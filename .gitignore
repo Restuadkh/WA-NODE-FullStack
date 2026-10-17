@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+auth/
+auth_*/
+src/auth/
+logs/
+*.log
+*.pem
+*.key
+*.sqlite
+dist/
