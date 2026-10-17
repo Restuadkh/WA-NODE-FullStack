@@ -13,6 +13,7 @@
     "db:sync": "node src/scripts/syncDb.js",
     "db:reset": "node src/scripts/syncDb.js --force",
     "seed:admin": "node src/scripts/seedAdmin.js",
+    "seed:user": "node src/scripts/seedUser.js",
     "test": "node --test \"test/*.test.js\""
   },
   "license": "ISC",
