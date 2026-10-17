@@ -4,6 +4,8 @@
   "description": "WhatsApp gateway + dashboard backend (Baileys, Express, Sequelize, socket.io)",
   "main": "src/server.js",
   "private": true,
+  "author": "",
+  "type": "commonjs",
   "engines": {
     "node": ">=20"
   },
