@@ -1,10 +1,11 @@
 const http = require("http");
+const crypto = require("crypto");
 const config = require("./config/config");
 const logger = require("./api/services/logger");
 
 if (!config.jwt.secret || config.jwt.secret.length < 16) {
-  logger.fatal("JWT_SECRET belum diisi (minimal 16 karakter). Buat dengan: openssl rand -hex 48");
-  process.exit(1);
+  config.jwt.secret = crypto.randomBytes(48).toString("hex");
+  logger.warn("JWT_SECRET belum valid; secret acak dibuat otomatis untuk sesi ini.");
 }
 
 const sequelize = require("./config/database");
