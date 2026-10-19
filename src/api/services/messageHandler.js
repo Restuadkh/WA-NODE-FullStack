@@ -11,16 +11,16 @@ const IGNORED_JID = (jid) =>
 
 // Pesan masuk dari WhatsApp (termasuk yang Anda kirim dari ponsel) -> DB -> dashboard
 async function handleIncoming(device, instance, msg) {
-  const key = msg?.message?.key ?? msg?.key;
-  const jid = getWhatsappJid(key);
-  const lid = getWhatsappLid(key);
-  const name = getWhatsappName(msg); 
-  await storeNumberName(jid, lid, name, device);
   if (IGNORED_JID(jid) || !msg.message) return;
 
   const parsed = parseContent(msg.message);
   if (!parsed) return;
 
+  const key = msg?.message?.key ?? msg?.key;
+  const jid = getWhatsappJid(key);
+  const lid = getWhatsappLid(key);
+  const name = getWhatsappName(msg); 
+  await storeNumberName(jid, lid, name, device);
   const fromMe = !!msg.key.fromMe;
   const isGroup = jid.endsWith("@g.us");
 
