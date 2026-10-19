@@ -4,13 +4,18 @@ const { emitToDevice } = require("./realtime");
 const { notify } = require("./webhook");
 const autoReply = require("./autoReply");
 const { parseContent, waTimestamp, findOrCreateChat, storeMessage } = require("./messageService");
+const { getWhatsappJid, getWhatsappLid, getWhatsappName, storeNumberName } = require("./numberService");
 
 const IGNORED_JID = (jid) =>
   !jid || jid === "status@broadcast" || jid.endsWith("@broadcast") || jid.endsWith("@newsletter");
 
 // Pesan masuk dari WhatsApp (termasuk yang Anda kirim dari ponsel) -> DB -> dashboard
 async function handleIncoming(device, instance, msg) {
-  const jid = msg.key?.remoteJid;
+  const key = msg?.message?.key ?? msg?.key;
+  const jid = getWhatsappJid(key);
+  const lid = getWhatsappLid(key);
+  const name = getWhatsappName(msg); 
+  await storeNumberName(jid, lid, name, device);
   if (IGNORED_JID(jid) || !msg.message) return;
 
   const parsed = parseContent(msg.message);

@@ -3,6 +3,7 @@ const QRCode = require("qrcode");
 const pino = require("pino");
 const {
   default: makeWASocket,
+  Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
 } = require("@whiskeysockets/baileys");
@@ -11,10 +12,10 @@ const logger = require("../services/logger");
 const { loadAuthState, removeAuthState } = require("./authStore");
 const { phoneFromJid } = require("./jid");
 
-const MAX_RECONNECT_ATTEMPTS = 10;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 // Log internal Baileys sangat berisik; tampilkan warn ke atas saja.
-const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "warn" });
+const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" });
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 
@@ -99,7 +100,8 @@ class WhatsAppInstance extends EventEmitter {
 
     const options = {
       auth: state,
-      browser: config.whatsapp.browser,
+      // browser: config.whatsapp.browser,
+      browser: Browsers.ubuntu("Chrome"),
       logger: baileysLogger,
       printQRInTerminal: false,
       defaultQueryTimeoutMs: 60_000,
@@ -130,8 +132,8 @@ class WhatsAppInstance extends EventEmitter {
     });
     sock.ev.on("messages.upsert", ({ type, messages }) => {
       if (type !== "notify") return; // pesan kita sendiri disimpan langsung oleh messageService
-      if (config.whatsapp.markMessagesRead) this._markRead(messages);
-      for (const msg of messages) this.emit("message", msg);
+      if (config.whatsapp.markMessagesRead) this._markRead(messages); // Tandai pesan sebagai dibaca jika diatur dalam konfigurasi
+      for (const msg of messages) this.emit("message", msg); // Emit event untuk setiap pesan baru
     });
     sock.ev.on("messages.update", (updates) => this.emit("message.update", updates));
 
@@ -157,7 +159,7 @@ class WhatsAppInstance extends EventEmitter {
   async _onQr(sock, qr) {
     if (this.phoneNumber) {
       // Mode pairing code (tanpa scan QR)
-      if (this.pairingRequested) return;
+      // if (this.pairingRequested) return;
       this.pairingRequested = true;
       try {
         this.pairingCode = await sock.requestPairingCode(this.phoneNumber);
