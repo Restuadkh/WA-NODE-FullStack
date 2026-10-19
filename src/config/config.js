@@ -13,6 +13,13 @@ const env = process.env.NODE_ENV || "development";
 const authStore =
   process.env.AUTH_STORE || (bool(process.env.MYSQL_ENABLED) ? "mysql" : "file");
 
+if(env !== "" ){
+  console.log(`Running in ${env} mode`);
+}else{
+  console.log("Running in default development mode");
+}
+
+
 module.exports = {
   env,
   isProduction: env === "production",

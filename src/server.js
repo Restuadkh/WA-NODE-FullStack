@@ -3,10 +3,10 @@ const crypto = require("crypto");
 const config = require("./config/config");
 const logger = require("./api/services/logger");
 
-if (!config.jwt.secret || config.jwt.secret.length < 16) {
-  config.jwt.secret = crypto.randomBytes(48).toString("hex");
-  logger.warn("JWT_SECRET belum valid; secret acak dibuat otomatis untuk sesi ini.");
-}
+// if (!config.jwt.secret || config.jwt.secret.length < 16) {
+//   config.jwt.secret = crypto.randomBytes(48).toString("hex");
+//   logger.warn("JWT_SECRET belum valid; secret acak dibuat otomatis untuk sesi ini.");
+// }
 
 const sequelize = require("./config/database");
 require("./api/models");
