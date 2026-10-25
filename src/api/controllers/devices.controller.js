@@ -1,6 +1,7 @@
 const { randomUUID } = require("crypto");
 const { Device, Chat, Message, AutoReplyRule } = require("../models");
 const manager = require("../whatsapp/manager");
+const mediaStore = require("../services/mediaStore");
 const logger = require("../services/logger");
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
@@ -81,6 +82,7 @@ async function removeDevice(req, res) {
   if (chatIds.length) await Message.destroy({ where: { chat_id: chatIds } });
   await Chat.destroy({ where: { device_id: device.id } });
   await AutoReplyRule.destroy({ where: { device_id: device.id } });
+  await mediaStore.removeDeviceMedia(device.id);
   await device.destroy();
 
   res.json({ error: false, message: "Device dihapus" });

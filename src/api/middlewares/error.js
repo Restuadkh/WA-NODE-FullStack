@@ -4,7 +4,6 @@ const logger = require("../services/logger");
 const notFound = (req, res) =>
   res.status(404).json({ error: true, message: "Endpoint tidak ditemukan" });
 
-// eslint-disable-next-line no-unused-vars
 const errorHandler = (err, req, res, next) => {
   let status = err.statusCode || err.status || 500;
   let message = err.message;

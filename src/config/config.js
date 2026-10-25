@@ -1,8 +1,14 @@
-require("dotenv").config();
+require("dotenv").config({ quiet: true });
 const path = require("path");
 
 const bool = (value, fallback = false) =>
   value === undefined || value === "" ? fallback : String(value).toLowerCase() === "true";
+
+const int = (value, fallback) => {
+  if (value === undefined || value === "") return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
 
 const list = (value, fallback = []) =>
   value ? String(value).split(",").map((s) => s.trim()).filter(Boolean) : fallback;
@@ -12,13 +18,6 @@ const env = process.env.NODE_ENV || "development";
 // Kompatibel dengan konfigurasi lama: MYSQL_ENABLED=true berarti kredensial WA disimpan di MySQL.
 const authStore =
   process.env.AUTH_STORE || (bool(process.env.MYSQL_ENABLED) ? "mysql" : "file");
-
-if(env !== "" ){
-  console.log(`Running in ${env} mode`);
-}else{
-  console.log("Running in default development mode");
-}
-
 
 module.exports = {
   env,
@@ -50,22 +49,48 @@ module.exports = {
     authStore, // "file" | "mysql"
     authDir: process.env.AUTH_DIR || path.join(__dirname, "../auth"),
     restoreOnStartup: bool(process.env.RESTORE_SESSIONS_ON_START_UP, true),
-    browser: [
-      process.env.CLIENT_PLATFORM || "Whatsapp MD",
-      process.env.CLIENT_BROWSER || "Chrome",
-      process.env.CLIENT_VERSION || "4.0.0",
-    ],
     markMessagesRead: bool(process.env.MARK_MESSAGES_READ),
     defaultCountryCode: process.env.DEFAULT_COUNTRY_CODE ?? "62",
+    // Penjadwalan koneksi ulang per instance. 0 = percobaan tanpa batas.
+    reconnectBaseDelayMs: int(process.env.WA_RECONNECT_BASE_MS, 1000),
+    reconnectMaxDelayMs: int(process.env.WA_RECONNECT_MAX_MS, 5 * 60 * 1000),
+    reconnectMaxAttempts: int(process.env.WA_RECONNECT_MAX_ATTEMPTS, 0),
   },
 
   gatewayApi: {
     protect: bool(process.env.PROTECT_ROUTES),
     token: process.env.TOKEN || "",
+    // true = key juga boleh lewat ?key= (lama). false = wajib header X-Api-Key.
+    allowQueryKey: bool(process.env.GATEWAY_ALLOW_QUERY_KEY, true),
+    // Batas request per menit per IP untuk /api/message/* (0 = tanpa batas)
+    rateLimitPerMinute: int(process.env.GATEWAY_RATE_LIMIT_PER_MINUTE, 120),
+  },
+
+  // Unduhan media dari URL (endpoint /api/message/mediaurl)
+  media: {
+    maxBytes: int(process.env.MEDIA_URL_MAX_MB, 25) * 1024 * 1024,
+    timeoutMs: int(process.env.MEDIA_URL_TIMEOUT_MS, 15000),
+    // Kosong = semua host publik boleh. Isi bila ingin membatasi (host persis atau subdomain).
+    allowedHosts: list(process.env.MEDIA_URL_ALLOWED_HOSTS),
+    // Penyimpanan media masuk/keluar (gambar, video, stiker, audio, dokumen)
+    dir: process.env.MEDIA_DIR || path.join(__dirname, "../media"),
+    // Batas ukuran media yang diunduh dari pesan masuk WhatsApp
+    maxIncomingBytes: int(process.env.MEDIA_MAX_MB, 25) * 1024 * 1024,
+    // Rahasia tanda tangan URL media. Default memakai JWT_SECRET.
+    tokenSecret: process.env.MEDIA_TOKEN_SECRET || process.env.JWT_SECRET || "",
+  },
+
+  autoReply: {
+    // Batas balasan otomatis per device per menit (0 = tanpa batas). Mengurangi risiko nomor diblokir.
+    maxPerMinute: int(process.env.AUTOREPLY_MAX_PER_MINUTE, 20),
   },
 
   webhook: {
     url: process.env.WEBHOOK_URL || "",
     events: list(process.env.WEBHOOK_ALLOWED_EVENTS, ["all"]),
+    // Bila diisi, body webhook ditandatangani HMAC-SHA256 (header X-Signature: sha256=<hex>)
+    secret: process.env.WEBHOOK_SECRET || "",
+    // true = sertakan instance_key di payload (perilaku lama, TIDAK disarankan)
+    includeKey: bool(process.env.WEBHOOK_INCLUDE_KEY),
   },
 };

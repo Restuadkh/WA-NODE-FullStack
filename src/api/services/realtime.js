@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
 const config = require("../../config/config");
 const logger = require("./logger");
+const { JWT_ALGORITHMS } = require("../middlewares/auth");
 
 let io = null;
 
@@ -19,7 +20,7 @@ function initRealtime(httpServer) {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error("unauthorized"));
     try {
-      socket.data.user = jwt.verify(token, config.jwt.secret);
+      socket.data.user = jwt.verify(token, config.jwt.secret, { algorithms: JWT_ALGORITHMS });
       next();
     } catch {
       next(new Error("unauthorized"));

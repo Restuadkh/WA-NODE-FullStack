@@ -5,6 +5,7 @@ node_modules/
 auth/
 auth_*/
 src/auth/
+src/media/
 logs/
 *.log
 *.pem

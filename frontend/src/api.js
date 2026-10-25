@@ -26,18 +26,26 @@ export const setUnauthorizedHandler = (fn) => {
   onUnauthorized = fn;
 };
 
-async function request(path, { method = "GET", body } = {}) {
+async function request(path, { method = "GET", body, form } = {}) {
   const headers = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+
+  let payload;
+  if (form) {
+    // FormData: browser menetapkan Content-Type multipart beserta boundary sendiri.
+    payload = form;
+  } else if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    payload = JSON.stringify(body);
+  }
 
   let res;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: payload,
     });
   } catch {
     throw new Error("Tidak bisa terhubung ke server. Pastikan backend berjalan.");
@@ -75,6 +83,15 @@ export const api = {
     request(`/api/chats/${chatId}/messages?limit=${limit}`).then(data),
   sendMessage: (chatId, text) =>
     request(`/api/chats/${chatId}/messages`, { method: "POST", body: { text } }).then(data),
+  // Kirim media: file (File/Blob), caption, type (image|video|audio|sticker|document), ptt (voice note)
+  sendMedia: (chatId, file, { caption = "", type, ptt = false, filename } = {}) => {
+    const form = new FormData();
+    form.append("file", file, filename || file.name || "file");
+    if (caption) form.append("caption", caption);
+    if (type) form.append("type", type);
+    if (ptt) form.append("ptt", "true");
+    return request(`/api/chats/${chatId}/messages`, { method: "POST", form }).then(data);
+  },
   markRead: (chatId) => request(`/api/chats/${chatId}/read`, { method: "POST" }).then(data),
 
   // --- auto-reply

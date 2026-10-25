@@ -1,24 +1,45 @@
 const http = require("http");
-const crypto = require("crypto");
 const config = require("./config/config");
+const { validateConfig } = require("./config/validate");
 const logger = require("./api/services/logger");
 
-// if (!config.jwt.secret || config.jwt.secret.length < 16) {
-//   config.jwt.secret = crypto.randomBytes(48).toString("hex");
-//   logger.warn("JWT_SECRET belum valid; secret acak dibuat otomatis untuk sesi ini.");
-// }
+// Konfigurasi tidak valid (mis. JWT_SECRET kosong/pendek) = jangan start sama sekali.
+const { errors, warnings } = validateConfig(config);
+warnings.forEach((w) => logger.warn(w));
+if (errors.length) {
+  errors.forEach((e) => logger.fatal(e));
+  process.exit(1);
+}
 
 const sequelize = require("./config/database");
 require("./api/models");
 const app = require("./app");
 const { initRealtime } = require("./api/services/realtime");
+const { ensureIndexes } = require("./api/services/dbIndexes");
+const { ensureMediaSchema } = require("./api/services/dbSchema");
 const manager = require("./api/whatsapp/manager");
 
 async function main() {
+  logger.info(`Mode ${config.env}`);
   await sequelize.authenticate();
   logger.info("Database terhubung");
-  // Hanya membuat tabel yang belum ada; tidak mengubah/menghapus data
-  if (config.db.autoSync) await sequelize.sync();
+  // Hanya membuat tabel yang belum ada; tidak mengubah/menghapus data.
+  if (config.db.autoSync) {
+    await sequelize.sync();
+    // Patch kolom media + ENUM sticker pada tabel `messages` lama (tidak menghapus data).
+    await ensureMediaSchema({
+      tolerant: true,
+      log: (m) => logger.debug(m),
+      warn: (m) => logger.warn(m),
+    });
+    // Pasang index v2.1 bila bisa. Pada DB lama yang berisi duplikat ini hanya memberi peringatan
+    // (server tetap jalan); rapikan dengan: npm run db:upgrade
+    await ensureIndexes({
+      tolerant: true,
+      log: (m) => logger.debug(m),
+      warn: (m) => logger.warn(m),
+    });
+  }
 
   const server = http.createServer(app);
   initRealtime(server); // socket.io harus dipasang di server yang sama dengan yang listen

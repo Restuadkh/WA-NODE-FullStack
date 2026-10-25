@@ -3,25 +3,67 @@ const logger = require("./logger");
 const { emitToDevice } = require("./realtime");
 const { notify } = require("./webhook");
 const autoReply = require("./autoReply");
-const { parseContent, waTimestamp, findOrCreateChat, storeMessage } = require("./messageService");
+const mediaStore = require("./mediaStore");
+const config = require("../../config/config");
+const { parseContent, parseMedia, waTimestamp, findOrCreateChat, storeMessage } = require("./messageService");
 const { getWhatsappJid, getWhatsappLid, getWhatsappName, storeNumberName } = require("./numberService");
 
 const IGNORED_JID = (jid) =>
   !jid || jid === "status@broadcast" || jid.endsWith("@broadcast") || jid.endsWith("@newsletter");
 
+// Unduh media dari WhatsApp lalu simpan ke disk. Kegagalan unduh tidak menggagalkan pesan:
+// riwayat tetap tersimpan dengan label teks (mis. "[Gambar]") agar agent tahu ada media.
+async function saveIncomingMedia(device, instance, msg, media) {
+  if (!media) return null;
+  if (media.fileLength && media.fileLength > config.media.maxIncomingBytes) {
+    logger.warn(
+      { device: device.id, size: media.fileLength, limit: config.media.maxIncomingBytes },
+      "Media masuk melebihi batas, tidak diunduh",
+    );
+    return null;
+  }
+
+  try {
+    const buffer = await instance.downloadMedia(msg);
+    if (!buffer?.length) return null;
+    const saved = await mediaStore.save({
+      deviceId: device.id,
+      messageId: msg.key?.id,
+      buffer,
+      mimetype: media.mimetype,
+      filename: media.filename,
+      type: media.kind,
+    });
+    return {
+      ...saved,
+      width: media.width,
+      height: media.height,
+      seconds: media.seconds,
+      ptt: media.ptt,
+      caption: media.caption,
+    };
+  } catch (err) {
+    logger.warn({ err: err.message, device: device.id, type: media.kind }, "Gagal mengunduh media masuk");
+    return null;
+  }
+}
+
 // Pesan masuk dari WhatsApp (termasuk yang Anda kirim dari ponsel) -> DB -> dashboard
 async function handleIncoming(device, instance, msg) {
   const jid = msg?.key?.remoteJid;
-  const key = msg?.message?.key ?? msg?.key;
-  const remoteJid = getWhatsappJid(key);
-  const lid = getWhatsappLid(key);
-  const name = getWhatsappName(msg); 
   if (IGNORED_JID(jid) || !msg.message) return;
 
   const parsed = parseContent(msg.message);
   if (!parsed) return;
 
-  await storeNumberName(remoteJid, lid, name, device);
+  // Pemetaan nomor <-> LID + nama kontak. Kegagalan di sini tidak boleh menghentikan penyimpanan pesan.
+  try {
+    const key = msg.message?.key ?? msg.key;
+    await storeNumberName(getWhatsappJid(key), getWhatsappLid(key), getWhatsappName(msg), device);
+  } catch (err) {
+    logger.warn({ err: err.message, device: device.id }, "Gagal menyimpan nama kontak");
+  }
+
   const fromMe = !!msg.key.fromMe;
   const isGroup = jid.endsWith("@g.us");
 
@@ -31,9 +73,11 @@ async function handleIncoming(device, instance, msg) {
   if (!fromMe && !isGroup && msg.pushName && chat.contact_name !== msg.pushName) {
     await chat.update({ contact_name: msg.pushName });
   } else if (isGroup && !chat.contact_name) {
-    const name = await instance.groupName(jid);
-    if (name) await chat.update({ contact_name: name });
+    const groupName = await instance.groupName(jid);
+    if (groupName) await chat.update({ contact_name: groupName });
   }
+
+  const media = await saveIncomingMedia(device, instance, msg, parseMedia(msg.message));
 
   const { created } = await storeMessage({
     device,
@@ -41,19 +85,24 @@ async function handleIncoming(device, instance, msg) {
     direction: fromMe ? "outgoing" : "incoming",
     type: parsed.type,
     body: parsed.body,
+    media,
     waMessageId: msg.key.id,
     status: fromMe ? "sent" : "delivered",
     at: waTimestamp(msg.messageTimestamp),
   });
   if (!created) return;
 
-  notify("messages", device.instance_key, {
+  notify("messages", device, {
     id: msg.key.id,
     jid,
     from_me: fromMe,
     push_name: msg.pushName || null,
     type: parsed.type,
     body: parsed.body,
+    media_url: media?.url || null,
+    media_mimetype: media?.mimetype || null,
+    media_filename: media?.filename || null,
+    media_ptt: !!media?.ptt,
     timestamp: Number(msg.messageTimestamp) || null,
   });
 

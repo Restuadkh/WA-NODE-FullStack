@@ -22,6 +22,8 @@ function fmtListTime(d) {
 const fmtTime = (d) =>
   d ? new Date(d).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "";
 
+const fmtDuration = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
 const dayLabel = (d) => new Date(d).toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
 function Ticks({ status }) {
@@ -29,6 +31,72 @@ function Ticks({ status }) {
   if (status === "pending") return <span className="tick">…</span>;
   if (status === "sent") return <span className="tick">✓</span>;
   return <span className={`tick ${status === "read" ? "tick-read" : ""}`}>✓✓</span>;
+}
+
+const MEDIA_LABEL = {
+  image: "Gambar",
+  video: "Video",
+  audio: "Audio",
+  sticker: "Stiker",
+  document: "Dokumen",
+};
+
+// Tebak jenis media dari file yang dipilih (webp = stiker).
+function mediaTypeForFile(file) {
+  const name = String(file?.name || "").toLowerCase();
+  const mime = String(file?.type || "").toLowerCase();
+  if (mime === "image/webp" || name.endsWith(".webp")) return "sticker";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+const bodyText = (m) => {
+  if (m.media_caption) return m.media_caption;
+  if (!m.body) return "";
+  return /^\[(Gambar|Video|Stiker|Audio|Pesan suara|Dokumen)\]/.test(m.body) ? "" : m.body;
+};
+
+// Tampilan media di dalam bubble. URL media sudah bertanda tangan dari server.
+function MediaContent({ m }) {
+  if (!m.media_url) {
+    return m.type !== "text" && m.type !== "other" ? <div className="media-tag">{MEDIA_LABEL[m.type] || m.type}</div> : null;
+  }
+
+  if (m.type === "image") {
+    return (
+      <a href={m.media_url} target="_blank" rel="noreferrer" className="media-wrap">
+        <img className="bubble-media" src={m.media_url} alt={m.media_caption || "Gambar"} loading="lazy" />
+      </a>
+    );
+  }
+  if (m.type === "video") {
+    return <video className="bubble-media" src={m.media_url} controls playsInline preload="metadata" />;
+  }
+  if (m.type === "sticker") {
+    return <img className="bubble-sticker" src={m.media_url} alt="Stiker" loading="lazy" />;
+  }
+  if (m.type === "audio") {
+    return (
+      <div className="voice-note">
+        <audio src={m.media_url} controls preload="metadata" />
+        <span className="small muted">{m.media_ptt ? "Pesan suara" : "Audio"}</span>
+      </div>
+    );
+  }
+  if (m.type === "document") {
+    return (
+      <a className="doc-link" href={m.media_url} target="_blank" rel="noreferrer">
+        📄 {m.media_filename || "Dokumen"}
+      </a>
+    );
+  }
+  return (
+    <a href={m.media_url} target="_blank" rel="noreferrer" className="small">
+      Buka media
+    </a>
+  );
 }
 
 export default function Inbox() {
@@ -44,12 +112,48 @@ export default function Inbox() {
   const [loadingChats, setLoadingChats] = useState(false);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [devicesLoaded, setDevicesLoaded] = useState(false);
+  const [attachment, setAttachment] = useState(null); // { file, type, ptt, name, previewUrl }
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
 
   const bottomRef = useRef(null);
   const activeIdRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const recorderRef = useRef(null);
+  const recorderChunks = useRef([]);
+  const recorderCancelled = useRef(false);
+  const attachmentRef = useRef(null);
+  attachmentRef.current = attachment;
   activeIdRef.current = activeId;
 
   const activeChat = useMemo(() => chats.find((c) => c.id === activeId) || null, [chats, activeId]);
+
+  const clearAttachment = useCallback(() => {
+    setAttachment((cur) => {
+      if (cur?.previewUrl) URL.revokeObjectURL(cur.previewUrl);
+      return null;
+    });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  // Bersihkan object URL & mikrofon saat komponen dilepas
+  useEffect(
+    () => () => {
+      if (attachmentRef.current?.previewUrl) URL.revokeObjectURL(attachmentRef.current.previewUrl);
+      try {
+        recorderRef.current?.stream?.getTracks?.().forEach((t) => t.stop());
+      } catch {
+        /* abaikan */
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!recording) return;
+    const timer = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [recording]);
 
   // Tandai dibaca di server (dipakai bersama oleh semua agent) lalu nolkan badge secara lokal
   const markRead = useCallback((chatId) => {
@@ -74,7 +178,8 @@ export default function Inbox() {
     setActiveId(null);
     setMessages([]);
     setMobileChatOpen(false);
-  }, [deviceId]);
+    clearAttachment();
+  }, [deviceId, clearAttachment]);
 
   // --- daftar chat (+ polling cadangan)
   const loadChats = useCallback(
@@ -161,19 +266,90 @@ export default function Inbox() {
   const send = async (e) => {
     e.preventDefault();
     const body = text.trim();
-    if (!body || !activeChat || sending) return;
+    const file = attachment?.file || null;
+    if ((!body && !file) || !activeChat || sending || recording) return;
     setSending(true);
     setError("");
     try {
-      const msg = await api.sendMessage(activeChat.id, body);
+      const msg = file
+        ? await api.sendMedia(activeChat.id, file, {
+            caption: body,
+            type: attachment.type,
+            ptt: !!attachment.ptt,
+            filename: attachment.name || file.name,
+          })
+        : await api.sendMessage(activeChat.id, body);
       setText("");
-      setMessages((list) => (list.some((m) => m.id === msg.id) ? list : [...list, msg]));
+      clearAttachment();
+      if (msg) setMessages((list) => (list.some((m) => m.id === msg.id) ? list : [...list, msg]));
       loadChats(false);
     } catch (err) {
       setError(err.message);
     } finally {
       setSending(false);
     }
+  };
+
+  const onPickFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    clearAttachment();
+    const type = mediaTypeForFile(file);
+    setAttachment({
+      file,
+      type,
+      ptt: false,
+      name: file.name,
+      previewUrl:
+        type === "image" || type === "video" || type === "sticker" || type === "audio"
+          ? URL.createObjectURL(file)
+          : null,
+    });
+    setError("");
+    e.target.value = "";
+  };
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("Perekam suara tidak didukung browser ini.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      recorderChunks.current = [];
+      recorderCancelled.current = false;
+      recorder.ondataavailable = (ev) => {
+        if (ev.data?.size) recorderChunks.current.push(ev.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        if (recorderCancelled.current) return;
+        const blob = new Blob(recorderChunks.current, { type: recorder.mimeType || "audio/webm" });
+        const name = `pesan-suara-${Date.now()}.webm`;
+        const file = new File([blob], name, { type: blob.type });
+        clearAttachment();
+        setAttachment({ file, type: "audio", ptt: true, name, previewUrl: URL.createObjectURL(blob) });
+      };
+      recorder.start();
+      setRecordSeconds(0);
+      setRecording(true);
+      setError("");
+    } catch {
+      setError("Tidak bisa mengakses mikrofon. Periksa izin browser.");
+    }
+  };
+
+  const stopRecording = (cancel = false) => {
+    recorderCancelled.current = cancel;
+    try {
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    } catch {
+      /* abaikan */
+    }
+    setRecording(false);
   };
 
   const onKeyDown = (e) => {
@@ -294,13 +470,8 @@ export default function Inbox() {
                 ) : (
                   <div key={row.key} className={`bubble-row ${row.m.direction === "outgoing" ? "out" : "in"}`}>
                     <div className={`bubble ${row.m.is_auto_reply ? "bubble-auto" : ""}`}>
-                      {row.m.type !== "text" && row.m.type !== "other" && <div className="media-tag">{row.m.type}</div>}
-                      {row.m.media_url && (
-                        <a href={row.m.media_url} target="_blank" rel="noreferrer" className="small">
-                          Buka media
-                        </a>
-                      )}
-                      <div className="bubble-text">{row.m.body}</div>
+                      <MediaContent m={row.m} />
+                      {bodyText(row.m) && <div className="bubble-text">{bodyText(row.m)}</div>}
                       <div className="bubble-meta">
                         {row.m.is_auto_reply && <span>auto-reply · </span>}
                         <span>{fmtTime(row.m.created_at || row.m.createdAt)}</span>
@@ -316,17 +487,73 @@ export default function Inbox() {
             {error && <div className="alert alert-error composer-alert">{error}</div>}
 
             <form className="composer" onSubmit={send}>
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={onKeyDown}
-                placeholder="Tulis balasan…"
-                title="Enter = kirim, Shift+Enter = baris baru"
-                rows={1}
-              />
-              <button className="btn btn-primary" disabled={sending || !text.trim()}>
-                {sending ? "Mengirim…" : "Kirim"}
-              </button>
+              <div className="composer-body">
+                {attachment && (
+                  <div className="attachment-preview">
+                    {(attachment.type === "image" || attachment.type === "sticker") && (
+                      <img src={attachment.previewUrl} alt="Pratinjau" className={attachment.type === "sticker" ? "preview-sticker" : "preview-media"} />
+                    )}
+                    {attachment.type === "video" && <video src={attachment.previewUrl} className="preview-media" controls />}
+                    {attachment.type === "audio" && <audio src={attachment.previewUrl} controls className="preview-audio" />}
+                    <span className="small muted">{attachment.ptt ? "Pesan suara" : attachment.name}</span>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={clearAttachment} title="Hapus lampiran">
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {recording && (
+                  <div className="recording-bar">
+                    <span className="rec-dot" /> Merekam {fmtDuration(recordSeconds)}
+                    <button type="button" className="btn btn-sm" onClick={() => stopRecording(false)}>
+                      Selesai
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => stopRecording(true)}>
+                      Batal
+                    </button>
+                  </div>
+                )}
+
+                <div className="composer-row">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*,audio/*,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt"
+                    onChange={onPickFile}
+                    hidden
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost icon-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={sending || recording}
+                    title="Lampirkan gambar, video, stiker, audio, atau dokumen"
+                  >
+                    📎
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-ghost icon-btn ${recording ? "recording" : ""}`}
+                    onClick={() => (recording ? stopRecording(false) : startRecording())}
+                    disabled={sending}
+                    title={recording ? "Selesai merekam" : "Rekam pesan suara"}
+                  >
+                    {recording ? "⏹" : "🎙"}
+                  </button>
+                  <textarea
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={onKeyDown}
+                    placeholder={attachment ? "Tulis caption (opsional)…" : "Tulis balasan…"}
+                    title="Enter = kirim, Shift+Enter = baris baru"
+                    rows={1}
+                    disabled={sending}
+                  />
+                  <button className="btn btn-primary" disabled={sending || recording || (!text.trim() && !attachment)}>
+                    {sending ? "Mengirim…" : recording ? "Rekam…" : "Kirim"}
+                  </button>
+                </div>
+              </div>
             </form>
           </>
         )}

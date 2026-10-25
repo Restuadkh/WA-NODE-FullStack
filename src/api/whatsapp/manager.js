@@ -7,8 +7,10 @@ const { handleIncoming, handleStatusUpdates } = require("../services/messageHand
 const { WhatsAppInstance } = require("./instance");
 const { listStoredKeys } = require("./authStore");
 
-// instance_key -> WhatsAppInstance (hidup di memori proses ini)
+// instance_key -> WhatsAppInstance (hidup di memori proses ini).
+// Karena itu aplikasi ini harus berjalan sebagai SATU proses (PM2 fork mode, bukan cluster).
 const instances = new Map();
+let shuttingDown = false;
 
 function create(device) {
   const instance = new WhatsAppInstance({
@@ -28,7 +30,7 @@ function create(device) {
       logger.error({ err, device: device.id }, "Gagal menyimpan status device");
     }
     emitAll("device:status", { device_id: device.id, status });
-    notify("connection", device.instance_key, { status, phone });
+    notify("connection", device, { status, phone });
   });
 
   instance.on("message", (msg) => handleIncoming(device, instance, msg));
@@ -40,6 +42,7 @@ function create(device) {
 
 // Ambil instance milik device (dibuat bila belum ada) dan pastikan sudah berjalan
 async function ensure(device) {
+  if (shuttingDown) return instances.get(device.instance_key) || null;
   const instance = instances.get(device.instance_key) || create(device);
   await instance.start();
   return instance;
@@ -64,20 +67,39 @@ async function adoptLegacySessions() {
   }
 }
 
-// Jalankan ulang semua device yang pernah tertaut
+// Jalankan ulang semua device yang pernah tertaut.
+// Setiap instance dijalankan dengan jeda kecil dan TIDAK saling menunggu: satu sesi yang lambat
+// (mis. menunggu QR/versi WhatsApp) tidak boleh menahan atau memutus sesi lainnya.
 async function restoreAll() {
+  if (shuttingDown) return 0;
   await adoptLegacySessions();
   const devices = await Device.findAll({
     where: { status: { [Op.in]: ["connected", "disconnected"] } },
+    order: [["last_connected_at", "DESC"]],
   });
   logger.info(`Memulihkan ${devices.length} sesi WhatsApp`);
-  for (const device of devices) {
-    await ensure(device); // berurutan agar tidak membanjiri server WhatsApp
-  }
+
+  const results = await Promise.allSettled(
+    devices.map(
+      (device, index) =>
+        new Promise((resolve) => setTimeout(resolve, index * 150)).then(() =>
+          shuttingDown ? null : ensure(device),
+        ),
+    ),
+  );
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      logger.error(
+        { err: result.reason, device: devices[index].id },
+        "Gagal memulihkan sesi WhatsApp",
+      );
+    }
+  });
   return devices.length;
 }
 
 async function stopAll() {
+  shuttingDown = true;
   await Promise.allSettled([...instances.values()].map((i) => i.stop()));
 }
 

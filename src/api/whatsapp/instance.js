@@ -6,18 +6,43 @@ const {
   Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } = require("@whiskeysockets/baileys");
 const config = require("../../config/config");
 const logger = require("../services/logger");
 const { loadAuthState, removeAuthState } = require("./authStore");
 const { phoneFromJid } = require("./jid");
 
-const MAX_RECONNECT_ATTEMPTS = 3;
-
 // Log internal Baileys sangat berisik; tampilkan warn ke atas saja.
 const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" });
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
+
+// Versi WhatsApp diambil sekali lalu dipakai bersama SEMUA instance. Sebelumnya setiap sesi
+// memanggil fetchLatestBaileysVersion() sendiri; saat banyak sesi dipulihkan/terhubung ulang,
+// permintaan yang menumpuk membuat proses lambat dan reconnect sesi lain ikut tertunda.
+let versionCache = { at: 0, version: null };
+let versionPromise = null;
+const VERSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+async function resolveVersion() {
+  if (versionCache.version && Date.now() - versionCache.at < VERSION_TTL_MS) {
+    return versionCache.version;
+  }
+  // Satu permintaan versi untuk semua sesi yang start bersamaan.
+  versionPromise ??= Promise.race([
+    fetchLatestBaileysVersion(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000)),
+  ])
+    .then((latest) => {
+      versionCache = { at: Date.now(), version: latest.version };
+      return latest.version;
+    })
+    .finally(() => {
+      versionPromise = null;
+    });
+  return versionPromise;
+}
 
 /**
  * Satu koneksi WhatsApp (Baileys).
@@ -42,8 +67,9 @@ class WhatsAppInstance extends EventEmitter {
 
     this.stopped = false;
     this.starting = null;
-    this.retries = 0;
+    this.generation = 0; // mencegah timer/generation lama menutup socket yang baru
     this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
     this.pairingRequested = false;
     this.groupNames = new Map();
   }
@@ -56,14 +82,25 @@ class WhatsAppInstance extends EventEmitter {
 
   start() {
     this.stopped = false;
-    if (!config.whatsapp.enabled || this.sock) return Promise.resolve(this);
-    this.starting ??= this._connect()
+    if (!config.whatsapp.enabled) return Promise.resolve(this);
+
+    // Jangan membuat socket ganda untuk satu instance. Pemanggilan berulang (polling QR,
+    // reconnect, restore) memakai proses yang sedang berjalan / socket yang sudah ada.
+    if (this.starting) return this.starting;
+    if (this.sock) return Promise.resolve(this);
+
+    const generation = ++this.generation;
+    this.starting = this._connect(generation)
       .catch((err) => {
+        if (this.stopped || generation !== this.generation) return;
         logger.error({ err, key: this.key }, "Gagal memulai instance");
+        this._closeSocket();
         this._setStatus("disconnected");
+        // Kegagalan saat membuka socket (bukan logout) tetap dijadwalkan ulang.
+        this._scheduleReconnect(undefined, generation);
       })
       .finally(() => {
-        this.starting = null;
+        if (generation === this.generation) this.starting = null;
       })
       .then(() => this);
     return this.starting;
@@ -72,14 +109,20 @@ class WhatsAppInstance extends EventEmitter {
   // Hentikan tanpa logout (dipakai saat server shutdown). Sesi tetap tersimpan.
   async stop() {
     this.stopped = true;
+    this.generation++;
+    this.starting = null;
     clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this._closeSocket();
   }
 
   // Logout dari WhatsApp dan hapus kredensial
   async logout() {
     this.stopped = true;
+    this.generation++;
+    this.starting = null;
     clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     const sock = this.sock;
     if (sock) {
       try {
@@ -93,14 +136,17 @@ class WhatsAppInstance extends EventEmitter {
     this._setStatus("logged_out");
   }
 
-  async _connect() {
+  async _connect(generation) {
     clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+
     const { state, saveCreds } = await loadAuthState(this.key);
     this.authState = state;
 
     const options = {
       auth: state,
-      // browser: config.whatsapp.browser,
+      // Pairing code hanya diterima WhatsApp untuk profil browser yang dikenal, jadi dikunci
+      // ke Chrome/Ubuntu (variabel CLIENT_* lama sudah dihapus karena tidak pernah dipakai).
       browser: Browsers.ubuntu("Chrome"),
       logger: baileysLogger,
       printQRInTerminal: false,
@@ -109,16 +155,13 @@ class WhatsAppInstance extends EventEmitter {
       syncFullHistory: false,
     };
     try {
-      const latest = await Promise.race([
-        fetchLatestBaileysVersion(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000)),
-      ]);
-      options.version = latest.version;
+      options.version = await resolveVersion();
     } catch (err) {
       logger.warn({ err: err.message }, "Tidak bisa mengambil versi WA terbaru, memakai versi bawaan Baileys");
     }
 
-    if (this.stopped) return; // stop() dipanggil saat menunggu
+    // stop()/logout() dipanggil selama menunggu auth/versi
+    if (this.stopped || generation !== this.generation) return;
 
     this.pairingRequested = false;
     const sock = makeWASocket(options);
@@ -146,7 +189,7 @@ class WhatsAppInstance extends EventEmitter {
     if (qr && !this.authState.creds.registered) await this._onQr(sock, qr);
 
     if (connection === "open") {
-      this.retries = 0;
+      this.reconnectAttempts = 0;
       this.qr = null;
       this.pairingCode = null;
       this.phone = phoneFromJid(sock.user?.id);
@@ -158,8 +201,10 @@ class WhatsAppInstance extends EventEmitter {
 
   async _onQr(sock, qr) {
     if (this.phoneNumber) {
-      // Mode pairing code (tanpa scan QR)
-      // if (this.pairingRequested) return;
+      // Mode pairing code (tanpa scan QR). WhatsApp mengirim event QR berulang (~20 detik);
+      // kode hanya diminta SEKALI per socket supaya tidak berganti saat pengguna mengetik
+      // dan tidak memicu rate limit.
+      if (this.pairingRequested) return;
       this.pairingRequested = true;
       try {
         this.pairingCode = await sock.requestPairingCode(this.phoneNumber);
@@ -184,31 +229,70 @@ class WhatsAppInstance extends EventEmitter {
 
     if (code === DisconnectReason.loggedOut) {
       await removeAuthState(this.key);
+      this.reconnectAttempts = 0;
       this._setStatus("logged_out");
       return;
     }
+
+    this._setStatus("disconnected");
+
+    // Sesi yang sama dibuka di tempat lain: jangan berebut dan memutus sesi lain terus-menerus.
+    // Pengguna harus logout/tautkan ulang secara sadar.
+    if (code === DisconnectReason.connectionReplaced) {
+      logger.warn({ key: this.key }, "Sesi digantikan koneksi WhatsApp lain; reconnect otomatis dihentikan");
+      return;
+    }
+
+    // QR kedaluwarsa / pairing batal: tunggu aksi pengguna (belum terdaftar).
+    const registered = !!this.authState?.creds?.registered;
+    if (!registered) return;
+
     // Setelah scan QR, WhatsApp meminta koneksi diulang (normal)
     if (code === DisconnectReason.restartRequired) {
       this._scheduleReconnect(0);
       return;
     }
-    this._setStatus("disconnected");
 
-    // QR kedaluwarsa / pairing batal / sesi dipakai di tempat lain: tunggu aksi pengguna
-    const registered = !!this.authState?.creds?.registered;
-    if (!registered || code === DisconnectReason.connectionReplaced) return;
-
-    if (++this.retries > MAX_RECONNECT_ATTEMPTS) {
-      logger.error({ key: this.key, code }, "Gagal tersambung berulang kali, berhenti mencoba");
-      return;
-    }
-    this._scheduleReconnect(Math.min(30_000, 1000 * 2 ** this.retries));
+    this._scheduleReconnect();
   }
 
-  _scheduleReconnect(delayMs) {
+  /**
+   * Jadwalkan reconnect untuk instance INI saja. Timer terpisah per instance, sehingga
+   * reconnect satu sesi tidak pernah menyentuh socket sesi lain.
+   * `generation` mencegah timer lama (mis. setelah stop/logout) menghidupkan socket baru.
+   */
+  _scheduleReconnect(delayMs, generation = this.generation) {
+    if (this.stopped) return;
+
+    const { reconnectBaseDelayMs, reconnectMaxDelayMs, reconnectMaxAttempts } = config.whatsapp;
+    this.reconnectAttempts += 1;
+
+    if (reconnectMaxAttempts > 0 && this.reconnectAttempts > reconnectMaxAttempts) {
+      logger.error(
+        { key: this.key, attempts: this.reconnectAttempts },
+        "Batas percobaan reconnect tercapai, instance berhenti mencoba",
+      );
+      return;
+    }
+
+    const exponential = Math.min(
+      reconnectMaxDelayMs,
+      reconnectBaseDelayMs * 2 ** Math.min(this.reconnectAttempts - 1, 10),
+    );
+    // Jitter kecil mencegah semua sesi reconnect pada milidetik yang sama.
+    const delay =
+      delayMs === 0 ? 0 : delayMs != null ? delayMs : Math.round(exponential * (0.85 + Math.random() * 0.3));
+
     clearTimeout(this.reconnectTimer);
-    logger.info({ key: this.key, delayMs }, "Menjadwalkan koneksi ulang");
-    this.reconnectTimer = setTimeout(() => this.start(), delayMs);
+    logger.info(
+      { key: this.key, delayMs: delay, attempt: this.reconnectAttempts },
+      "Menjadwalkan koneksi ulang",
+    );
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.stopped || generation !== this.generation || this.sock) return;
+      this.start();
+    }, delay);
   }
 
   _closeSocket() {
@@ -234,6 +318,17 @@ class WhatsAppInstance extends EventEmitter {
     if (keys.length) this.sock?.readMessages(keys).catch(() => {});
   }
 
+  // ---------------------------------------------------------------- media
+
+  // Unduh media dari pesan masuk (gambar, video, stiker, audio, dokumen).
+  async downloadMedia(msg) {
+    const sock = this._ensureOnline();
+    return downloadMediaMessage(msg, "buffer", {}, {
+      logger: baileysLogger,
+      reuploadRequest: sock.updateMediaMessage.bind(sock),
+    });
+  }
+
   // ---------------------------------------------------------------- sending
 
   _ensureOnline() {
@@ -250,16 +345,37 @@ class WhatsAppInstance extends EventEmitter {
     return this._ensureOnline().sendMessage(jid, { text });
   }
 
-  sendMedia(jid, { buffer, mimetype, filename }, type, caption = "") {
-    const content = { [type]: buffer, mimetype, fileName: filename };
-    if (type === "image" || type === "video") content.caption = caption;
-    if (type === "audio") content.ptt = true;
-    return this._ensureOnline().sendMessage(jid, content);
-  }
-
-  sendMediaUrl(jid, url, type, mimetype, caption = "") {
-    const content = { [type]: { url }, mimetype };
-    if (type === "image" || type === "video") content.caption = caption;
+  /**
+   * Kirim media. `type`: image | video | audio | sticker | document.
+   * Opsi: { ptt (audio voice note), seconds, width, height, gifPlayback }
+   */
+  sendMedia(jid, { buffer, mimetype, filename, seconds, width, height }, type, caption = "", opts = {}) {
+    const content = {};
+    if (type === "sticker") {
+      content.sticker = buffer;
+    } else if (type === "audio") {
+      content.audio = buffer;
+      content.mimetype = mimetype || "audio/ogg; codecs=opus";
+      content.ptt = opts.ptt ?? true;
+      if (seconds) content.seconds = Number(seconds);
+    } else if (type === "document") {
+      content.document = buffer;
+      content.mimetype = mimetype || "application/octet-stream";
+      content.fileName = filename || "file";
+      if (caption) content.caption = caption;
+    } else {
+      // image / video
+      content[type] = buffer;
+      content.mimetype = mimetype || (type === "image" ? "image/jpeg" : "video/mp4");
+      if (caption) content.caption = caption;
+      if (filename) content.fileName = filename;
+      if (type === "video") {
+        if (seconds) content.seconds = Number(seconds);
+        if (opts.gifPlayback) content.gifPlayback = true;
+      }
+      if (width) content.width = Number(width);
+      if (height) content.height = Number(height);
+    }
     return this._ensureOnline().sendMessage(jid, content);
   }
 
