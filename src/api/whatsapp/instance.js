@@ -345,6 +345,11 @@ class WhatsAppInstance extends EventEmitter {
     return this._ensureOnline().sendMessage(jid, { text });
   }
 
+  // Status "composing"/"paused" untuk simulasi manusia (opsional, dipakai antrean).
+  sendPresence(jid, state) {
+    return this._ensureOnline().sendPresenceUpdate(state, jid);
+  }
+
   /**
    * Kirim media. `type`: image | video | audio | sticker | document.
    * Opsi: { ptt (audio voice note), seconds, width, height, gifPlayback }

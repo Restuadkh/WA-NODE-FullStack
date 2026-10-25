@@ -90,7 +90,22 @@ async function save({ deviceId, messageId, buffer, mimetype, filename, type }) {
     mimetype: baseMime(mimetype) || null,
     filename: displayName,
     size: buffer.length,
+    // Nama file di disk (dipakai internal antrean untuk membaca/menghapus file sementara).
+    disk_name: diskName,
   };
+}
+
+// Hapus satu file media (dipakai antrean setelah pesan terkirim/dibatalkan).
+async function remove(deviceId, filename) {
+  const file = resolve(deviceId, filename);
+  if (!file) return false;
+  try {
+    await fs.promises.unlink(file);
+    return true;
+  } catch (err) {
+    logger.warn({ err: err.message, deviceId, filename }, "Gagal menghapus file media");
+    return false;
+  }
 }
 
 // Path absolut file bila ada dan masih berada di dalam folder device (anti path traversal).
@@ -111,6 +126,7 @@ async function removeDeviceMedia(deviceId) {
 
 module.exports = {
   save,
+  remove,
   resolve,
   verify,
   publicUrl,

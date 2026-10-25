@@ -68,11 +68,14 @@ export const api = {
 
   // --- device
   listDevices: () => request("/api/devices").then(data),
-  createDevice: (name, phone_number) =>
+  createDevice: (name, phone_number, extra = {}) =>
     request("/api/devices", {
       method: "POST",
-      body: { name, phone_number: phone_number || undefined },
+      body: { name, phone_number: phone_number || undefined, ...extra },
     }).then(data),
+  // patch: { name?, webhook_url?, webhook_secret? } — "" mengosongkan webhook/secret.
+  updateDevice: (id, patch) =>
+    request(`/api/devices/${id}`, { method: "PUT", body: patch }).then(data),
   deleteDevice: (id) => request(`/api/devices/${id}`, { method: "DELETE" }),
   // -> { status, qr (data URL PNG | null), pairing_code | null }. Memulai instance bila belum jalan.
   deviceQr: (id) => request(`/api/devices/${id}/qr`).then(data),
@@ -100,4 +103,16 @@ export const api = {
     request(`/api/devices/${deviceId}/rules`, { method: "POST", body: rule }).then(data),
   updateRule: (id, patch) => request(`/api/rules/${id}`, { method: "PUT", body: patch }).then(data),
   deleteRule: (id) => request(`/api/rules/${id}`, { method: "DELETE" }),
+
+  // --- antrean pesan
+  listJobs: (deviceId, { status = "", limit = 100, offset = 0 } = {}) => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+    return request(`/api/devices/${deviceId}/jobs?${params}`);
+  },
+  jobStats: (deviceId) => request(`/api/devices/${deviceId}/jobs/stats`).then(data),
+  cancelJob: (id) => request(`/api/jobs/${id}`, { method: "DELETE" }).then(data),
+  retryJob: (id) => request(`/api/jobs/${id}/retry`, { method: "POST" }).then(data),
 };

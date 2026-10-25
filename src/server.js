@@ -16,8 +16,9 @@ require("./api/models");
 const app = require("./app");
 const { initRealtime } = require("./api/services/realtime");
 const { ensureIndexes } = require("./api/services/dbIndexes");
-const { ensureMediaSchema } = require("./api/services/dbSchema");
+const { ensureMediaSchema, ensureDeviceWebhookSchema } = require("./api/services/dbSchema");
 const manager = require("./api/whatsapp/manager");
+const queueService = require("./api/services/queueService");
 
 async function main() {
   logger.info(`Mode ${config.env}`);
@@ -28,6 +29,12 @@ async function main() {
     await sequelize.sync();
     // Patch kolom media + ENUM sticker pada tabel `messages` lama (tidak menghapus data).
     await ensureMediaSchema({
+      tolerant: true,
+      log: (m) => logger.debug(m),
+      warn: (m) => logger.warn(m),
+    });
+    // Kolom webhook per device (v2.3).
+    await ensureDeviceWebhookSchema({
       tolerant: true,
       log: (m) => logger.debug(m),
       warn: (m) => logger.warn(m),
@@ -47,6 +54,9 @@ async function main() {
   await new Promise((resolve) => server.listen(config.port, resolve));
   logger.info(`Server berjalan di port ${config.port}`);
 
+  // Worker antrean berjalan di proses yang sama (wajib single process, sama seperti instance WA).
+  await queueService.start();
+
   if (config.whatsapp.restoreOnStartup) {
     manager
       .restoreAll()
@@ -59,6 +69,7 @@ async function main() {
     closing = true;
     logger.info(`${signal} diterima, menutup server...`);
     server.close();
+    await queueService.stop();
     await manager.stopAll();
     await sequelize.close().catch(() => {});
     process.exit(0);

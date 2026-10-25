@@ -4,6 +4,7 @@ import { useAuth } from "../auth";
 import { getSocket } from "../socket";
 import StatusBadge from "../components/StatusBadge";
 import QrModal from "../components/QrModal";
+import DeviceEditModal from "../components/DeviceEditModal";
 
 const fmt = (d) => (d ? new Date(d).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "-");
 
@@ -17,8 +18,11 @@ export default function Devices() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [qrDevice, setQrDevice] = useState(null);
+  const [editDevice, setEditDevice] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -49,9 +53,14 @@ export default function Devices() {
     setBusy(true);
     setError("");
     try {
-      const device = await api.createDevice(name.trim(), phone.trim());
+      const device = await api.createDevice(name.trim(), phone.trim(), {
+        webhook_url: webhookUrl.trim() || undefined,
+        webhook_secret: webhookSecret || undefined,
+      });
       setName("");
       setPhone("");
+      setWebhookUrl("");
+      setWebhookSecret("");
       setShowForm(false);
       await load();
       setQrDevice(device); // langsung tampilkan QR / kode pairing
@@ -99,9 +108,34 @@ export default function Devices() {
             <span>Nomor (opsional, untuk kode pairing tanpa QR)</span>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="628123456789" inputMode="numeric" />
           </label>
+          <label className="field grow">
+            <span>Webhook URL (opsional)</span>
+            <input
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              placeholder="https://contoh.com/webhook/whatsapp"
+              inputMode="url"
+              maxLength={500}
+            />
+          </label>
+          <label className="field grow">
+            <span>Webhook secret (opsional)</span>
+            <input
+              value={webhookSecret}
+              onChange={(e) => setWebhookSecret(e.target.value)}
+              placeholder="untuk signature X-Signature"
+              type="password"
+              autoComplete="new-password"
+              maxLength={255}
+            />
+          </label>
           <button className="btn btn-primary" disabled={busy}>
             {busy ? "Membuat…" : "Buat & tautkan"}
           </button>
+          <p className="muted small form-hint">
+            Webhook menerima event <code>messages</code> dan <code>connection</code> khusus device ini.
+            Bisa diubah kapan saja lewat tombol Edit.
+          </p>
         </form>
       )}
 
@@ -130,6 +164,7 @@ export default function Devices() {
                 <tr key={d.id}>
                   <td>
                     <div className="strong">{d.name}</div>
+                    {d.webhook_configured && <div className="muted small">webhook aktif</div>}
                     {d.instance_key && <div className="muted small mono">key: {d.instance_key}</div>}
                   </td>
                   <td className="mono">{d.phone_number || "-"}</td>
@@ -141,6 +176,11 @@ export default function Devices() {
                     {d.status !== "connected" && (
                       <button className="btn btn-sm" onClick={() => setQrDevice(d)}>
                         Tautkan
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <button className="btn btn-sm" onClick={() => setEditDevice(d)}>
+                        Edit
                       </button>
                     )}
                     {isAdmin && (
@@ -161,6 +201,10 @@ export default function Devices() {
           <code>key</code> dipakai aplikasi lain untuk mengirim pesan lewat <code>POST /api/message/text?key=…</code>.
           Hanya admin yang dapat melihatnya.
         </p>
+      )}
+
+      {editDevice && (
+        <DeviceEditModal device={editDevice} onClose={() => setEditDevice(null)} onSaved={load} />
       )}
 
       {qrDevice && (

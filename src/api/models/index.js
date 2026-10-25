@@ -4,6 +4,7 @@ const Chat = require("./Chat");
 const Message = require("./Message");
 const AutoReplyRule = require("./AutoReplyRule");
 const ContactName = require("./ContactName");
+const MessageJob = require("./MessageJob");
 
 Device.hasMany(Chat, { foreignKey: "device_id", onDelete: "CASCADE" });
 Chat.belongsTo(Device, { foreignKey: "device_id" });
@@ -20,4 +21,9 @@ Message.belongsTo(User, { foreignKey: "sent_by_user_id" });
 Device.hasMany(AutoReplyRule, { foreignKey: "device_id", onDelete: "CASCADE" });
 AutoReplyRule.belongsTo(Device, { foreignKey: "device_id" });
 
-module.exports = { User, Device, Chat, Message, AutoReplyRule, ContactName };
+Device.hasMany(MessageJob, { foreignKey: "device_id", onDelete: "CASCADE" });
+MessageJob.belongsTo(Device, { foreignKey: "device_id" });
+MessageJob.belongsTo(Message, { foreignKey: "message_id" });
+MessageJob.belongsTo(User, { foreignKey: "created_by_user_id" });
+
+module.exports = { User, Device, Chat, Message, AutoReplyRule, ContactName, MessageJob };

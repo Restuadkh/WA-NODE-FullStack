@@ -1,6 +1,6 @@
 {
   "name": "wa-dashboard-backend",
-  "version": "2.2.0",
+  "version": "2.4.0",
   "description": "WhatsApp gateway + dashboard backend (Baileys, Express, Sequelize, socket.io)",
   "main": "src/server.js",
   "private": true,

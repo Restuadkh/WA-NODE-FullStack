@@ -17,33 +17,50 @@ function create(device) {
     key: device.instance_key,
     phoneNumber: device.phone_number,
   });
+  // Referensi device terbaru (bisa diganti lewat refreshDevice saat admin mengubah webhook/nama).
+  instance.device = device;
 
   instance.on("status", async ({ status, phone }) => {
+    const current = instance.device;
     const patch = { status };
     if (status === "connected") {
       patch.last_connected_at = new Date();
       if (phone) patch.phone_number = phone;
     }
     try {
-      await device.update(patch);
+      await current.update(patch);
     } catch (err) {
-      logger.error({ err, device: device.id }, "Gagal menyimpan status device");
+      logger.error({ err, device: current.id }, "Gagal menyimpan status device");
     }
-    emitAll("device:status", { device_id: device.id, status });
-    notify("connection", device, { status, phone });
+    emitAll("device:status", { device_id: current.id, status });
+    notify("connection", current, { status, phone });
   });
 
-  instance.on("message", (msg) => handleIncoming(device, instance, msg));
-  instance.on("message.update", (updates) => handleStatusUpdates(device, updates));
+  instance.on("message", (msg) => handleIncoming(instance.device, instance, msg));
+  instance.on("message.update", (updates) => handleStatusUpdates(instance.device, updates));
 
   instances.set(device.instance_key, instance);
+  return instance;
+}
+
+// Ganti referensi device pada instance yang sedang berjalan (dipanggil setelah update device),
+// agar event berikutnya memakai nama/webhook terbaru tanpa perlu reconnect.
+function refreshDevice(device) {
+  const instance = instances.get(device.instance_key);
+  if (instance) instance.device = device;
   return instance;
 }
 
 // Ambil instance milik device (dibuat bila belum ada) dan pastikan sudah berjalan
 async function ensure(device) {
   if (shuttingDown) return instances.get(device.instance_key) || null;
-  const instance = instances.get(device.instance_key) || create(device);
+  const existing = instances.get(device.instance_key);
+  if (existing) {
+    existing.device = device;
+    await existing.start();
+    return existing;
+  }
+  const instance = create(device);
   await instance.start();
   return instance;
 }
@@ -103,4 +120,4 @@ async function stopAll() {
   await Promise.allSettled([...instances.values()].map((i) => i.stop()));
 }
 
-module.exports = { ensure, get, remove, restoreAll, stopAll };
+module.exports = { ensure, get, remove, refreshDevice, restoreAll, stopAll };

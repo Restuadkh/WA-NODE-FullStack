@@ -22,27 +22,32 @@ const MEDIA_COLUMNS = {
 
 const TYPE_VALUES = ["text", "image", "document", "audio", "video", "sticker", "other"];
 
+// Webhook per device (v2.3). Tabel `devices` lama belum punya kolom ini.
+const DEVICE_WEBHOOK_COLUMNS = {
+  webhook_url: { type: DataTypes.STRING(500), allowNull: true },
+  webhook_secret: { type: DataTypes.STRING(255), allowNull: true },
+};
+
 function tableNameOf(model) {
   const name = model.getTableName();
   return typeof name === "string" ? name : name.tableName;
 }
 
-async function ensureMediaColumns({ log = () => {}, dryRun = false } = {}) {
-  const { Message } = require("../models");
+async function ensureColumns(model, columns, { log = () => {}, dryRun = false } = {}) {
   const qi = sequelize.getQueryInterface();
-  const table = tableNameOf(Message);
+  const table = tableNameOf(model);
 
   let existing;
   try {
     existing = await qi.describeTable(table);
   } catch {
     // Tabel belum ada (DB baru). sequelize.sync() akan membuatnya lengkap.
-    log(`${table}: tabel belum ada, kolom media dibuat oleh sync()`);
+    log(`${table}: tabel belum ada, kolom baru dibuat oleh sync()`);
     return { added: [], existing: [] };
   }
 
   const added = [];
-  for (const [name, definition] of Object.entries(MEDIA_COLUMNS)) {
+  for (const [name, definition] of Object.entries(columns)) {
     if (existing[name]) continue;
     if (dryRun) {
       log(`${table}: [dry-run] akan menambah kolom ${name}`);
@@ -52,7 +57,17 @@ async function ensureMediaColumns({ log = () => {}, dryRun = false } = {}) {
     added.push(name);
     log(`${table}: kolom ${name} ditambahkan`);
   }
-  return { added, existing: Object.keys(MEDIA_COLUMNS).filter((name) => existing[name]) };
+  return { added, existing: Object.keys(columns).filter((name) => existing[name]) };
+}
+
+async function ensureMediaColumns(options = {}) {
+  const { Message } = require("../models");
+  return ensureColumns(Message, MEDIA_COLUMNS, options);
+}
+
+async function ensureDeviceWebhookColumns(options = {}) {
+  const { Device } = require("../models");
+  return ensureColumns(Device, DEVICE_WEBHOOK_COLUMNS, options);
 }
 
 async function ensureMessageTypeEnum({ log = () => {}, dryRun = false } = {}) {
@@ -95,4 +110,24 @@ async function ensureMediaSchema({ log = () => {}, warn = log, dryRun = false, t
   return result;
 }
 
-module.exports = { ensureMediaSchema, ensureMediaColumns, ensureMessageTypeEnum, MEDIA_COLUMNS, TYPE_VALUES };
+// `tolerant` dipakai saat start server: kegagalan hanya diperingatkan.
+async function ensureDeviceWebhookSchema({ log = () => {}, warn = log, dryRun = false, tolerant = false } = {}) {
+  try {
+    return await ensureDeviceWebhookColumns({ log, dryRun });
+  } catch (err) {
+    if (!tolerant) throw err;
+    warn(`Kolom webhook device belum lengkap (${err.message}). Jalankan: npm run db:upgrade`);
+    return { added: [], existing: [] };
+  }
+}
+
+module.exports = {
+  ensureMediaSchema,
+  ensureMediaColumns,
+  ensureMessageTypeEnum,
+  ensureDeviceWebhookSchema,
+  ensureDeviceWebhookColumns,
+  MEDIA_COLUMNS,
+  DEVICE_WEBHOOK_COLUMNS,
+  TYPE_VALUES,
+};

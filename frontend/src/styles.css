@@ -128,6 +128,17 @@ h2 { font-size: 17px; }
 .badge-connected { background: var(--accent-soft); color: var(--accent-strong); }
 .badge-pending_qr { background: var(--warn-bg); color: var(--warn-text); }
 .badge-disconnected, .badge-logged_out { background: var(--err-bg); color: var(--err-text); }
+.badge-pending, .badge-sending { background: var(--warn-bg); color: var(--warn-text); }
+.badge-sent { background: var(--accent-soft); color: var(--accent-strong); }
+.badge-failed, .badge-cancelled { background: var(--err-bg); color: var(--err-text); }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 14px 0 8px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.stat-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.stat-value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+.stat-limit { font-size: 13px; font-weight: 500; color: var(--muted); }
+.job-text { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-error { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-target { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Shell ---------- */
 .shell { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
@@ -174,8 +185,12 @@ h2 { font-size: 17px; }
 /* ---------- Modal / QR ---------- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(8, 14, 11, 0.55); display: grid; place-items: center; padding: 16px; z-index: 50; }
 .modal { background: var(--surface); border-radius: 16px; padding: 22px; width: 100%; max-width: 380px; border: 1px solid var(--border); }
+.modal.wide { max-width: 540px; }
 .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
 .modal-head h2 { margin-bottom: 6px; }
+.modal-head p { margin: 0; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.form-hint { flex-basis: 100%; margin: 4px 0 0; }
 .qr-area { display: grid; place-items: center; min-height: 280px; background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
 .qr-img { width: 100%; max-width: 280px; height: auto; image-rendering: pixelated; }
 .qr-placeholder { color: #66736c; text-align: center; padding: 20px; }

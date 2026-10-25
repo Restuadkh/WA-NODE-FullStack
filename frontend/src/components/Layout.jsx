@@ -29,6 +29,10 @@ export default function Layout() {
             <Icon d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM12 18h.01" />
             <span>Devices</span>
           </NavLink>
+          <NavLink to="/queue" aria-label="Antrian" title="Antrian" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <Icon d="M12 6v6l4 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+            <span>Antrian</span>
+          </NavLink>
           <NavLink to="/rules" aria-label="Auto-reply" title="Auto-reply" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Icon d="M13 2L3 14h8l-1 8 10-12h-8z" />
             <span>Auto-reply</span>

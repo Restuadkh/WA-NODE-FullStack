@@ -12,6 +12,9 @@ const Device = sequelize.define("Device", {
     defaultValue: "pending_qr",
   },
   last_connected_at: { type: DataTypes.DATE, allowNull: true },
+  // Webhook khusus device ini. Kosong = pakai WEBHOOK_URL global (bila diisi).
+  webhook_url: { type: DataTypes.STRING(500), allowNull: true },
+  webhook_secret: { type: DataTypes.STRING(255), allowNull: true },
 });
 
 module.exports = Device;

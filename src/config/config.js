@@ -85,6 +85,30 @@ module.exports = {
     maxPerMinute: int(process.env.AUTOREPLY_MAX_PER_MINUTE, 20),
   },
 
+  // Antrean pesan keluar (outbox) untuk pengiriman massal yang lebih aman.
+  // Semua batas dihitung per device. 0 = tanpa batas.
+  queue: {
+    enabled: bool(process.env.QUEUE_ENABLED, true),
+    pollMs: int(process.env.QUEUE_POLL_MS, 1000),
+    // Jeda acak antar pesan dari antrean (ms).
+    minDelayMs: int(process.env.QUEUE_MIN_DELAY_MS, 8000),
+    maxDelayMs: int(process.env.QUEUE_MAX_DELAY_MS, 25000),
+    // Kuota rolling 1 jam / 24 jam. Menghitung SEMUA pesan keluar device,
+    // termasuk balasan manual dan auto-reply.
+    hourlyLimit: int(process.env.QUEUE_HOURLY_LIMIT, 60),
+    dailyLimit: int(process.env.QUEUE_DAILY_LIMIT, 200),
+    maxAttempts: int(process.env.QUEUE_MAX_ATTEMPTS, 3),
+    retryBaseMs: int(process.env.QUEUE_RETRY_BASE_MS, 30000),
+    retryMaxMs: int(process.env.QUEUE_RETRY_MAX_MS, 15 * 60 * 1000),
+    batchMax: int(process.env.QUEUE_BATCH_MAX, 100),
+    // Jam kirim lokal, mis. "8-21". Kosong / "0-24" = sepanjang hari.
+    activeHours: String(process.env.QUEUE_ACTIVE_HOURS ?? "").trim(),
+    timezone: process.env.QUEUE_TIMEZONE || "Asia/Jakarta",
+    // Simulasi "sedang mengetik" sebelum kirim (menambah jeda, lebih natural).
+    typing: bool(process.env.QUEUE_TYPING, false),
+    typingMaxMs: int(process.env.QUEUE_TYPING_MAX_MS, 4000),
+  },
+
   webhook: {
     url: process.env.WEBHOOK_URL || "",
     events: list(process.env.WEBHOOK_ALLOWED_EVENTS, ["all"]),
@@ -92,5 +116,7 @@ module.exports = {
     secret: process.env.WEBHOOK_SECRET || "",
     // true = sertakan instance_key di payload (perilaku lama, TIDAK disarankan)
     includeKey: bool(process.env.WEBHOOK_INCLUDE_KEY),
+    // Batas waktu request webhook (ms). Integrasi harus membalas 2xx secepat mungkin.
+    timeoutMs: int(process.env.WEBHOOK_TIMEOUT_MS, 5000),
   },
 };
