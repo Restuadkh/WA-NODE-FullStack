@@ -1204,6 +1204,39 @@ Panduan lengkap + contoh integrasi: **[WebHook.md](WebHook.md)**.
 }
 ```
 
+**Event `message.update`**
+
+Dikirim saat status pesan keluar berubah naik (`sent` → `delivered` → `read`). Berlaku untuk pesan dari dashboard, API, antrean, auto-reply, dan ponsel.
+
+```json
+{
+  "id": "...",
+  "version": "1.0",
+  "event": "message.update",
+  "device_id": "a1b2c3d4-...",
+  "device_name": "CS Utama",
+  "timestamp": 1760000050000,
+  "data": {
+    "id": "3EB0A1B2C3D4E5F6",
+    "jid": "628123456789@s.whatsapp.net",
+    "from_me": true,
+    "status": "delivered",
+    "previous_status": "sent",
+    "message_id": "0192f1c2-...",
+    "chat_id": "b2c3d4e5-...",
+    "type": "text",
+    "body": "Halo dari sistem",
+    "media_url": null,
+    "media_mimetype": null,
+    "media_filename": null,
+    "media_ptt": false,
+    "timestamp": 1760000000
+  }
+}
+```
+
+Detail field dan contoh penerima: **[WebHook.md](WebHook.md#4a-event-messageupdate)**.
+
 **Event `connection`**
 
 ```json
@@ -1223,7 +1256,7 @@ Panduan lengkap + contoh integrasi: **[WebHook.md](WebHook.md)**.
 | Header | Keterangan |
 |---|---|
 | `Content-Type` | `application/json` |
-| `X-Webhook-Event` | `messages` atau `connection` |
+| `X-Webhook-Event` | `messages`, `message.update`, atau `connection` |
 | `X-Webhook-Id` | Sama dengan `id` di payload |
 | `X-Signature` | `sha256=<hex>` = HMAC-SHA256 body mentah (jika secret diisi) |
 | `User-Agent` | `WA-Dashboard-Webhook/1.0` |
@@ -1231,7 +1264,7 @@ Panduan lengkap + contoh integrasi: **[WebHook.md](WebHook.md)**.
 Aturan:
 
 - Secret dipilih dari `device.webhook_secret`, lalu `WEBHOOK_SECRET` global.
-- `WEBHOOK_ALLOWED_EVENTS` hanya menyaring webhook **global**; webhook per device menerima `messages` dan `connection`.
+- `WEBHOOK_ALLOWED_EVENTS` hanya menyaring webhook **global**; webhook per device menerima `messages`, `message.update`, dan `connection`.
 - `instance_key` **tidak** disertakan, kecuali `WEBHOOK_INCLUDE_KEY=true`.
 - Timeout 5 detik (`WEBHOOK_TIMEOUT_MS`), fire-and-forget, **tanpa retry otomatis**. Balas `2xx` secepat mungkin.
 
@@ -1306,7 +1339,7 @@ socket.on("device:status", ({ device_id, status }) => {
 | `MEDIA_URL_TIMEOUT_MS` | `15000` | Timeout unduhan `/mediaurl` |
 | `MEDIA_URL_ALLOWED_HOSTS` | – | Whitelist host untuk `/mediaurl` |
 | `WEBHOOK_URL` | – | URL webhook global (fallback untuk device tanpa webhook sendiri) |
-| `WEBHOOK_ALLOWED_EVENTS` | `all` | `all`, `messages`, `connection` (hanya untuk webhook global) |
+| `WEBHOOK_ALLOWED_EVENTS` | `all` | `all`, `messages`, `message.update`, `connection` (hanya untuk webhook global) |
 | `WEBHOOK_SECRET` | – | Secret HMAC signature default |
 | `WEBHOOK_INCLUDE_KEY` | `false` | Ikutkan `instance_key` di payload webhook |
 | `WEBHOOK_TIMEOUT_MS` | `5000` | Timeout pengiriman webhook |

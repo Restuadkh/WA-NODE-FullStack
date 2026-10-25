@@ -421,13 +421,55 @@ test("balas dari dashboard: sukses, validasi, dan device offline", async () => {
   instance.status = "connected";
 });
 
-test("status pesan keluar naik: sent -> delivered -> read (tidak turun)", async () => {
-  const msg = await Message.findOne({ where: { wa_message_id: `OUT${sent.length}` } });
-  const key = { id: msg.wa_message_id, fromMe: true };
-  await handleStatusUpdates(device, [{ key, update: { status: 4 } }]);
-  assert.equal((await msg.reload()).status, "read");
-  await handleStatusUpdates(device, [{ key, update: { status: 3 } }]);
-  assert.equal((await msg.reload()).status, "read");
+test("status pesan keluar naik: sent -> delivered -> read, dan dikirim ke webhook", async () => {
+  const received = [];
+  const receiver = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      received.push({ headers: req.headers, raw });
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("ok");
+    });
+  });
+  await new Promise((r) => receiver.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${receiver.address().port}/hook`;
+  const waitFor = async (n) => {
+    for (let i = 0; i < 100 && received.length < n; i++) await new Promise((r) => setTimeout(r, 20));
+  };
+
+  const previousUrl = device.webhook_url;
+  device.webhook_url = url;
+  try {
+    const msg = await Message.findOne({ where: { wa_message_id: `OUT${sent.length}` } });
+    const key = { id: msg.wa_message_id, fromMe: true };
+    await handleStatusUpdates(device, [{ key, update: { status: 4 } }]);
+    assert.equal((await msg.reload()).status, "read");
+    await handleStatusUpdates(device, [{ key, update: { status: 3 } }]);
+    assert.equal((await msg.reload()).status, "read");
+
+    await waitFor(1);
+    assert.equal(received.length, 1, "satu update status = satu webhook");
+    const payload = JSON.parse(received[0].raw);
+    assert.equal(payload.event, "message.update");
+    assert.equal(received[0].headers["x-webhook-event"], "message.update");
+    assert.equal(payload.data.id, key.id);
+    assert.equal(payload.data.jid, "628111111111@s.whatsapp.net");
+    assert.equal(payload.data.from_me, true);
+    assert.equal(payload.data.status, "read");
+    assert.equal(payload.data.previous_status, "sent");
+    assert.equal(payload.data.message_id, msg.id);
+    assert.equal(payload.data.chat_id, msg.chat_id);
+    assert.ok(payload.data.timestamp > 0, "waktu pesan (epoch detik) ikut dikirim");
+
+    // Status yang tidak naik tidak memicu webhook tambahan.
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(received.length, 1);
+  } finally {
+    device.webhook_url = previousUrl;
+    receiver.closeAllConnections?.();
+    await new Promise((r) => receiver.close(r));
+  }
 });
 
 test("auto-reply: rule hanya dibuat admin, membalas sekali (cooldown)", async () => {

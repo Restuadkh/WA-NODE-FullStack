@@ -4,7 +4,7 @@ Panduan lengkap memakai **webhook per device** untuk integrasi aplikasi lain (CR
 
 - **Format**: HTTP `POST`, body JSON
 - **Arah**: dari WA Dashboard → aplikasi Anda
-- **Event**: `messages` dan `connection`
+- **Event**: `messages`, `message.update`, dan `connection`
 - **Konfigurasi**: per device (dashboard) atau lewat REST API
 - **Signature**: opsional, HMAC-SHA256 (`X-Signature`)
 - **Timeout**: 5 detik, tanpa retry otomatis
@@ -19,6 +19,7 @@ Referensi endpoint lain: [RES-API.md](RES-API.md).
 2. [Mengatur Webhook](#2-mengatur-webhook)
 3. [Format Standar Payload](#3-format-standar-payload)
 4. [Event `messages`](#4-event-messages)
+4A. [Event `message.update`](#4a-event-messageupdate)
 5. [Event `connection`](#5-event-connection)
 6. [Verifikasi Signature](#6-verifikasi-signature)
 7. [Yang Harus Dilakukan Aplikasi Penerima](#7-yang-harus-dilakukan-aplikasi-penerima)
@@ -35,6 +36,7 @@ Referensi endpoint lain: [RES-API.md](RES-API.md).
 WhatsApp ──► WA Dashboard ──HTTP POST──► Aplikasi Anda
                  │                           │
                  │  event: messages          │ simpan / proses
+                 │  event: message.update    │ update status kirim
                  │  event: connection        │ balas 2xx < 5 detik
                  └───────────────────────────┘
 ```
@@ -43,7 +45,7 @@ Aturan utama:
 
 1. **Satu URL per device.** Device A dan Device B bisa mengirim ke aplikasi/endpoint yang berbeda.
 2. **Fallback global.** Device yang tidak punya `webhook_url` memakai `WEBHOOK_URL` dari `.env` (perilaku lama).
-3. **Webhook per device menerima semua event** (`messages` + `connection`). Filter `WEBHOOK_ALLOWED_EVENTS` hanya berlaku untuk webhook global.
+3. **Webhook per device menerima semua event** (`messages` + `message.update` + `connection`). Filter `WEBHOOK_ALLOWED_EVENTS` hanya berlaku untuk webhook global.
 4. **Fire-and-forget.** Setelah request dikirim, server tidak menunggu balasan lebih dari 5 detik dan **tidak mengulang** request yang gagal.
 5. **Tidak ada instance_key.** Kredensial API tidak pernah ikut, kecuali Anda menyalakan `WEBHOOK_INCLUDE_KEY=true`.
 
@@ -52,9 +54,10 @@ Aturan utama:
 | Event | Kapan dikirim |
 |---|---|
 | `messages` | Ada pesan yang masuk lewat event WhatsApp — termasuk pesan yang **Anda kirim dari ponsel** (`from_me: true`). |
+| `message.update` | Status pesan keluar berubah: `sent` → `delivered` → `read`. Berlaku untuk pesan dari dashboard, API, antrean, auto-reply, dan ponsel. |
 | `connection` | Status koneksi device berubah: `pending_qr`, `connected`, `disconnected`, `logged_out`. |
 
-> **Catatan:** pesan yang dikirim dari dashboard atau lewat API `/api/message/*` **tidak** memicu webhook `messages` (aplikasi Anda yang mengirim, jadi tidak perlu echo). Yang dikirim adalah pesan yang diterima dari WhatsApp, termasuk yang diketik dari ponsel yang tertaut.
+> **Catatan:** pesan yang dikirim dari dashboard atau lewat API `/api/message/*` **tidak** memicu webhook `messages` (aplikasi Anda yang mengirim, jadi tidak perlu echo). Yang dikirim adalah pesan yang diterima dari WhatsApp, termasuk yang diketik dari ponsel yang tertaut. Untuk pesan keluar tersebut, gunakan `message.update` bila ingin tahu kapan pesan terkirim/dibaca.
 
 ---
 
@@ -151,7 +154,7 @@ Semua event memakai **envelope yang sama**:
 |---|---|---|
 | `id` | string (UUID) | ID unik pengiriman. Pakai untuk **idempotency** (abaikan `id` yang sudah pernah diproses). |
 | `version` | string | Versi format payload. Saat ini `"1.0"`. |
-| `event` | string | `messages` atau `connection`. |
+| `event` | string | `messages`, `message.update`, atau `connection`. |
 | `device_id` | string (UUID) | Device pengirim event. Stabil, aman dipakai sebagai kunci. |
 | `device_name` | string | Nama device saat event terjadi. Bisa berubah. |
 | `timestamp` | number | Waktu event (epoch **milidetik**, UTC). |
@@ -163,7 +166,7 @@ Semua event memakai **envelope yang sama**:
 | Header | Contoh | Keterangan |
 |---|---|---|
 | `Content-Type` | `application/json` | Selalu JSON |
-| `X-Webhook-Event` | `messages` | Sama dengan `event` |
+| `X-Webhook-Event` | `messages` | Sama dengan `event` (`messages`, `message.update`, `connection`) |
 | `X-Webhook-Id` | `6f1c2a9e-...` | Sama dengan `id` |
 | `X-Signature` | `sha256=ab12...` | Ada hanya jika secret diisi |
 | `User-Agent` | `WA-Dashboard-Webhook/1.0` | Identitas pengirim |
@@ -233,6 +236,65 @@ Dikirim untuk setiap pesan WhatsApp yang masuk/disinkronkan (termasuk pesan dari
 - Pesan dari `status@broadcast`, `@broadcast`, dan `@newsletter`.
 - Pesan keluar yang dikirim lewat **dashboard** atau **API** `/api/message/*` (tidak di-echo).
 - Event duplikat dari WhatsApp (sudah pernah diproses) tidak dikirim ulang.
+
+---
+
+## 4A. Event `message.update`
+
+Dikirim saat status pesan **keluar** berubah naik: `sent` → `delivered` → `read`. Event hanya dikirim ketika status benar-benar berubah (tidak ada duplikat atau penurunan status).
+
+Berlaku untuk semua pesan keluar: dashboard, API `/api/message/*`, antrean (`queue`), auto-reply, dan pesan yang Anda kirim dari ponsel yang tertaut.
+
+```json
+{
+  "id": "7d3e5f21-9a4b-4c6d-8e10-3f2a1b0c9d8e",
+  "version": "1.0",
+  "event": "message.update",
+  "device_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "device_name": "CS Utama",
+  "timestamp": 1760000050000,
+  "data": {
+    "id": "3EB0A1B2C3D4E5F6",
+    "jid": "628123456789@s.whatsapp.net",
+    "from_me": true,
+    "status": "delivered",
+    "previous_status": "sent",
+    "message_id": "0192f1c2-3a4b-7c8d-9e0f-123456789abc",
+    "chat_id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+    "type": "text",
+    "body": "Halo dari sistem",
+    "media_url": null,
+    "media_mimetype": null,
+    "media_filename": null,
+    "media_ptt": false,
+    "timestamp": 1760000000
+  }
+}
+```
+
+| Field `data` | Tipe | Keterangan |
+|---|---|---|
+| `id` | string | ID pesan WhatsApp (`wa_message_id`). Pakai bersama `jid` untuk mencocokkan pesan. |
+| `jid` | string | Chat tujuan: `...@s.whatsapp.net`, `...@g.us`, `...@lid` |
+| `from_me` | boolean | Selalu `true` (status hanya untuk pesan keluar) |
+| `status` | string | Status baru: `sent`, `delivered`, atau `read` |
+| `previous_status` | string | Status sebelumnya di database |
+| `message_id` | string (UUID) | ID pesan di database dashboard (bila ada) |
+| `chat_id` | string (UUID) | ID chat di database dashboard |
+| `type` | string | `text`, `image`, `video`, `audio`, `sticker`, `document`, `other` |
+| `body` | string/null | Teks pesan atau label media + caption |
+| `media_url` | string/null | Path media bertanda tangan (relatif) |
+| `media_mimetype` | string/null | MIME media |
+| `media_filename` | string/null | Nama file asli |
+| `media_ptt` | boolean | `true` = voice note |
+| `timestamp` | number/null | Waktu pesan dibuat (epoch **detik**) |
+
+Catatan:
+
+- `timestamp` di dalam `data` adalah waktu **pesan**, sedangkan `timestamp` di envelope adalah waktu **update status**.
+- Status `failed`/`pending` dari WhatsApp tidak dikirim; pesan keluar disimpan sebagai `sent` dan hanya transisi ke atas yang dilaporkan.
+- Event `message.update` bisa datang **setelah** `messages` untuk pesan yang dikirim dari ponsel.
+- Gunakan `id` + `jid` sebagai kunci untuk memperbarui status di aplikasi Anda, atau `message_id` bila menyimpan ID dashboard.
 
 ---
 
@@ -410,10 +472,11 @@ func webhook(w http.ResponseWriter, r *http.Request) {
 2. **Verifikasi `X-Signature`** memakai raw body (jika secret dipakai).
 3. **Idempotensi**: simpan `id` (header `X-Webhook-Id`) yang sudah diproses. Request bisa terkirim lebih dari sekali pada kondisi tertentu (mis. restart, event berulang).
 4. **Dedupe pesan**: untuk `messages`, gunakan kombinasi `device_id + data.jid + data.id`.
-5. **Jangan mengandalkan urutan.** Meski dikirim berurutan, jaringan bisa membuat event datang tidak berurutan. Gunakan `timestamp`/`data.timestamp` bila butuh urutan.
-6. **Tangani `media_url` segera** dan simpan file di storage Anda sendiri bila perlu.
-7. **Log `id` dan `event`** untuk memudahkan troubleshooting.
-8. **Kembalikan status non-2xx bila gagal** agar terlihat di log server (walaupun tidak ada retry otomatis).
+5. **Update status**: untuk `message.update`, cocokkan `data.id` + `data.jid` (atau `data.message_id`) dan simpan status terbaru. Abaikan status yang lebih rendah dari yang sudah tersimpan.
+6. **Jangan mengandalkan urutan.** Meski dikirim berurutan, jaringan bisa membuat event datang tidak berurutan. Gunakan `timestamp`/`data.timestamp` bila butuh urutan.
+7. **Tangani `media_url` segera** dan simpan file di storage Anda sendiri bila perlu.
+8. **Log `id` dan `event`** untuk memudahkan troubleshooting.
+9. **Kembalikan status non-2xx bila gagal** agar terlihat di log server (walaupun tidak ada retry otomatis).
 
 Response yang disarankan:
 
@@ -460,6 +523,9 @@ app.post("/webhook/whatsapp", express.raw({ type: "application/json" }), (req, r
       const absolute = new URL(m.media_url, "https://wa.contoh.com").toString();
       console.log("media:", absolute, m.media_mimetype, m.media_filename);
     }
+  } else if (event.event === "message.update") {
+    const u = event.data;
+    console.log(`[${event.device_name}] status ${u.jid} (${u.id}): ${u.previous_status} -> ${u.status}`);
   } else if (event.event === "connection") {
     console.log(`[${event.device_name}] status: ${event.data.status}`);
   }
@@ -505,6 +571,7 @@ Salin URL HTTPS hasil tunnel ke kolom Webhook URL.
 | Event | Cara memicu |
 |---|---|
 | `messages` | Kirim pesan WhatsApp ke nomor device (atau kirim dari ponsel yang tertaut ke chat mana pun). |
+| `message.update` | Kirim pesan dari dashboard/API/antrean, lalu tunggu centang berubah (terkirim → diterima → dibaca). Bisa juga dari ponsel yang tertaut. |
 | `connection` | Restart server, atau putuskan/sambungkan ulang device. Perubahan status juga terlihat di dashboard. |
 
 ### 9.4 Cek dari sisi server
@@ -532,6 +599,7 @@ Salin URL HTTPS hasil tunnel ke kolom Webhook URL.
 | Timeout / log `Webhook gagal terkirim` | Aplikasi penerima > 5 detik atau tidak dapat diakses | Balas `2xx` dulu, proses async; naikkan `WEBHOOK_TIMEOUT_MS` bila perlu |
 | Event dobel | Event berulang dari WhatsApp / restart | Dedupe dengan `id` dan `data.id` |
 | Event `messages` tidak dikirim untuk pesan dari dashboard/API | Memang by design (tidak echo) | Gunakan response API/dashboard sebagai konfirmasi |
+| Event `message.update` tidak datang | Penerima belum membuka/membaca pesan, atau status tidak berubah | Tunggu centang berubah; status hanya dikirim saat naik (`sent` → `delivered` → `read`) |
 | Media `403` | URL diubah / signature rusak | Gunakan `media_url` apa adanya |
 | Media `404` | File sudah dihapus (device dihapus / folder dibersihkan) | Unduh & simpan media segera |
 | Ganti secret tapi masih gagal | Aplikasi masih memakai secret lama | Samakan secret di kedua sisi |
@@ -545,6 +613,7 @@ Salin URL HTTPS hasil tunnel ke kolom Webhook URL.
 - [ ] Signature **selalu diverifikasi** dari raw body memakai perbandingan constant-time.
 - [ ] Endpoint membalas `2xx` dalam < 5 detik; pekerjaan berat masuk queue.
 - [ ] Idempotensi berdasarkan `X-Webhook-Id` dan dedupe pesan berdasarkan `device_id + jid + data.id`.
+- [ ] Status `message.update` disimpan sebagai status terbaru (tidak menurunkan status yang sudah lebih tinggi).
 - [ ] Media diunduh dan disimpan di storage sendiri bila dibutuhkan.
 - [ ] Monitoring: catat request masuk, status response, dan kegagalan.
 - [ ] Uji saat device `disconnected` dan setelah server restart.

@@ -105,7 +105,7 @@ async function handleIncoming(device, instance, msg) {
     media_ptt: !!media?.ptt,
     timestamp: Number(msg.messageTimestamp) || null,
   });
-
+  console.debug({ id: msg.key.id, jid, from_me: fromMe }, "Pesan masuk diproses");
   if (!fromMe) await autoReply.reply({ device, instance, chat, text: parsed.type === "text" ? parsed.body : "" });
 }
 
@@ -120,15 +120,35 @@ async function handleStatusUpdates(device, updates) {
 
     const message = await Message.findOne({
       where: { wa_message_id: key.id, direction: "outgoing" },
-      include: [{ model: Chat, where: { device_id: device.id }, attributes: ["id"] }],
+      include: [{ model: Chat, where: { device_id: device.id }, attributes: ["id", "wa_jid"] }],
     });
     if (!message || RANK[status] <= RANK[message.status]) continue;
 
+    const previousStatus = message.status;
     await message.update({ status });
     emitToDevice(device.id, "message:update", {
       chat_id: message.chat_id,
       message_id: message.id,
       status,
+    });
+
+    // Status pesan juga dikirim ke webhook agar aplikasi lain bisa melacak
+    // terkirim/dibaca tanpa polling. Hanya transisi naik (tidak ada duplikat).
+    notify("message.update", device, {
+      id: key.id,
+      jid: message.Chat?.wa_jid || key.remoteJid || null,
+      from_me: true,
+      status,
+      previous_status: previousStatus,
+      message_id: message.id,
+      chat_id: message.chat_id,
+      type: message.type,
+      body: message.body,
+      media_url: message.media_url || null,
+      media_mimetype: message.media_mimetype || null,
+      media_filename: message.media_filename || null,
+      media_ptt: !!message.media_ptt,
+      timestamp: Math.floor(new Date(message.createdAt).getTime() / 1000) || null,
     });
   }
 }

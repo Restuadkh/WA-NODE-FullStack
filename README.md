@@ -14,7 +14,7 @@ Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersam
 - Auto-reply berbasis kata kunci (exact / contains / starts_with / `*`), per device, dengan batas balasan per menit
 - API kirim pesan untuk aplikasi lain: teks, gambar, video, audio, voice note, stiker, dokumen, media dari URL
 - Reconnect otomatis **per sesi** dengan backoff + jitter; satu sesi yang terputus tidak memutus/menahan sesi lain
-- Webhook keluar (opsional, dapat ditandatangani HMAC) untuk pesan masuk dan status koneksi, **diatur per device** dari dashboard (fallback `WEBHOOK_URL` global)
+- Webhook keluar (opsional, dapat ditandatangani HMAC) untuk pesan masuk, **update status pesan** (terkirim/diterima/dibaca), dan status koneksi, **diatur per device** dari dashboard (fallback `WEBHOOK_URL` global)
 - **Antrean pesan keluar (anti-ban)**: kirim lewat `POST /api/message/queue` — jeda acak 8–25 detik, satu pesan sekaligus per device, kuota rolling per jam/24 jam, jam kirim, simulasi mengetik, retry backoff, dan halaman **Antrian** di dashboard. Device boleh offline saat enqueue; job tetap ada setelah restart. Panduan: **[QUEUE.md](QUEUE.md)**
 
 ## Instalasi
@@ -90,7 +90,7 @@ Endpoint `queue`, `queue/batch`, `queue/media`, `queue/mediaurl`; job dipantau/d
 ## Webhook
 Webhook diatur **per device**: isi URL (dan secret opsional) saat membuat device atau lewat tombol **Edit** di halaman Devices. Device tanpa webhook memakai `WEBHOOK_URL` global sebagai fallback.
 
-Payload (JSON): `{ "id", "version": "1.0", "event": "messages" | "connection", "device_id", "device_name", "timestamp", "data": {...} }`. **`instance_key` tidak ikut dikirim** (set `WEBHOOK_INCLUDE_KEY=true` hanya bila klien lama masih membutuhkannya).
+Payload (JSON): `{ "id", "version": "1.0", "event": "messages" | "message.update" | "connection", "device_id", "device_name", "timestamp", "data": {...} }`. **`instance_key` tidak ikut dikirim** (set `WEBHOOK_INCLUDE_KEY=true` hanya bila klien lama masih membutuhkannya).
 
 Bila secret diisi, setiap request membawa `X-Signature: sha256=<hex>` = HMAC-SHA256 dari **body mentah**, plus header `X-Webhook-Event` dan `X-Webhook-Id`. Panduan integrasi lengkap (contoh Node.js/PHP/Python, verifikasi signature, troubleshooting): **[WebHook.md](WebHook.md)**.
 

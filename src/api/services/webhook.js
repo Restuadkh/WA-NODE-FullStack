@@ -16,7 +16,7 @@ const sign = (secret, body) => `sha256=${crypto.createHmac("sha256", secret).upd
  *
  * Payload standar:
  *   {
- *     id, version, event: "messages" | "connection",
+ *     id, version, event: "messages" | "message.update" | "connection",
  *     device_id, device_name, timestamp, data: {...}
  *   }
  * instance_key (kredensial API) TIDAK disertakan, kecuali WEBHOOK_INCLUDE_KEY=true.
@@ -55,13 +55,21 @@ function notify(event, device, data) {
     "X-Webhook-Id": id,
   };
   if (secret) headers["X-Signature"] = sign(secret, body);
-
+  console.debug({ url, event, device_id: device.id, body, headers }, "Mengirim webhook");
   fetch(url, {
     method: "POST",
     headers,
     body,
     signal: AbortSignal.timeout(config.webhook.timeoutMs),
-  }).catch((err) => logger.warn({ err: err.message, event }, "Webhook gagal terkirim"));
+  })
+  .then((res) => {
+    if (!res.ok) {
+      logger.warn({ status: res.status, event }, "Webhook ditolak penerima");
+      return;
+    }
+    logger.info({ event, status: res.status }, `Webhook terkirim`);
+  })
+  .catch((err) => logger.warn({ err: err.message, event }, "Webhook gagal terkirim"));
 }
 
 module.exports = { notify, sign };
