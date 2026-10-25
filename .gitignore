@@ -13,3 +13,7 @@ logs/
 *.sqlite
 dist/
 src/auth/*
+.htaccess
+.well-known/
+src/.htaccess
+yarn.lock
