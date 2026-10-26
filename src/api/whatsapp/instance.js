@@ -70,6 +70,8 @@ class WhatsAppInstance extends EventEmitter {
     this.generation = 0; // mencegah timer/generation lama menutup socket yang baru
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
+    this.watchdog = null; // interval "healing" escrow: menghidupkan ulang reconnect yang mati
+    this.replaced = false; // sesi digantikan koneksi lain (connectionReplaced) -> tidak di-heal otomatis
     this.pairingRequested = false;
     this.groupNames = new Map();
   }
@@ -113,6 +115,8 @@ class WhatsAppInstance extends EventEmitter {
     this.starting = null;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    clearInterval(this.watchdog);
+    this.watchdog = null;
     this._closeSocket();
   }
 
@@ -123,6 +127,8 @@ class WhatsAppInstance extends EventEmitter {
     this.starting = null;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    clearInterval(this.watchdog);
+    this.watchdog = null;
     const sock = this.sock;
     if (sock) {
       try {
@@ -164,6 +170,7 @@ class WhatsAppInstance extends EventEmitter {
     if (this.stopped || generation !== this.generation) return;
 
     this.pairingRequested = false;
+    this.replaced = false; // start manual (tombol Tautkan) boleh mencoba lagi walau sempat digantikan
     const sock = makeWASocket(options);
     this.sock = sock;
 
@@ -221,6 +228,9 @@ class WhatsAppInstance extends EventEmitter {
 
   async _onClose(error) {
     const code = error?.output?.statusCode;
+    // Log setiap putus koneksi lengkap dengan kodenya; tanpa ini penyebab sessi
+    // yang berhenti healing tidak akan pernah terlihat di log.
+    logger.info({ key: this.key, code, reason: error?.message?.slice(0, 200) }, "Koneksi WhatsApp terputus");
     this._closeSocket();
     this.qr = null;
     this.pairingCode = null;
@@ -239,6 +249,10 @@ class WhatsAppInstance extends EventEmitter {
     // Sesi yang sama dibuka di tempat lain: jangan berebut dan memutus sesi lain terus-menerus.
     // Pengguna harus logout/tautkan ulang secara sadar.
     if (code === DisconnectReason.connectionReplaced) {
+      // Tandai agar watchdog TIDAK otomatis menghidupkan ulang (memulihkan koneksi
+      // terus-menerus hanya membuat dua koneksi saling menendang - ping-pong 440).
+      // Pemulihan tetap mungkin lewat tombol "Tautkan" (start manual) di dashboard.
+      this.replaced = true;
       logger.warn({ key: this.key }, "Sesi digantikan koneksi WhatsApp lain; reconnect otomatis dihentikan");
       return;
     }
@@ -260,17 +274,24 @@ class WhatsAppInstance extends EventEmitter {
    * Jadwalkan reconnect untuk instance INI saja. Timer terpisah per instance, sehingga
    * reconnect satu sesi tidak pernah menyentuh socket sesi lain.
    * `generation` mencegah timer lama (mis. setelah stop/logout) menghidupkan socket baru.
+   * Watchdog (`_ensureWatchdog`) dipasang di sini sebagai jaring pengaman: bila timer
+   * hilang atau batas percobaan tercapai, device tidak diam di status disconnected
+   * selamanya melainkan tetap di-heal dengan ritme lambat (reconnectMaxDelayMs).
    */
   _scheduleReconnect(delayMs, generation = this.generation) {
     if (this.stopped) return;
 
     const { reconnectBaseDelayMs, reconnectMaxDelayMs, reconnectMaxAttempts } = config.whatsapp;
+    this._ensureWatchdog();
     this.reconnectAttempts += 1;
 
     if (reconnectMaxAttempts > 0 && this.reconnectAttempts > reconnectMaxAttempts) {
-      logger.error(
+      // Tidak berhenti total (dulu mati total -> device menggantung di "disconnected").
+      // Healing dilanjutkan perlahan oleh watchdog: maksimal 1 percobaan per
+      // reconnectMaxDelayMs, jadi tetap tidak membanjiri jaringan.
+      logger.warn(
         { key: this.key, attempts: this.reconnectAttempts },
-        "Batas percobaan reconnect tercapai, instance berhenti mencoba",
+        "Batas cepat reconnect tercapai, percobaan lanjutan dipindah ke watchdog (lambat)",
       );
       return;
     }
@@ -293,6 +314,32 @@ class WhatsAppInstance extends EventEmitter {
       if (this.stopped || generation !== this.generation || this.sock) return;
       this.start();
     }, delay);
+  }
+
+  /**
+   * Jaring pengaman healing ("max healing tetapi lambat"): interval ringan per instance
+   * yang memastikan device tidak menggantung di status "disconnected" tanpa upaya reconnect
+   * (mis. timer hilang, exception di jalur yang tidak diperhitungkan, atau batas percobaan
+   * tercapai). Ritmenya lambat = reconnectMaxDelayMs, sehingga ikut tetap hemat jaringan.
+   * Tidak aktif untuk: stop/logout, sesi yang menunggu QR, dan sesi yang digantikan
+   * koneksi lain (connectionReplaced) karena menghidupkannya memicu rebutan 440.
+   */
+  _ensureWatchdog() {
+    if (this.watchdog) return;
+    const { reconnectMaxDelayMs } = config.whatsapp;
+    const interval = Math.max(60_000, reconnectMaxDelayMs);
+    this.watchdog = setInterval(() => {
+      if (this.stopped || this.sock || this.reconnectTimer || this.starting) return;
+      if (this.status !== "disconnected") return;
+      if (this.replaced) return; // butuh aksi pengguna (Tautkan), bukan healing otomatis
+      if (!this.authState?.creds?.registered) return; // belum pernah ter-scan QR
+      logger.warn(
+        { key: this.key, attempts: this.reconnectAttempts },
+        "Watchdog healing: device masih disconnected, memaksa percobaan koneksi ulang",
+      );
+      this.start();
+    }, interval);
+    this.watchdog.unref?.();
   }
 
   _closeSocket() {

@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 // sehingga tidak perlu mengatur CORS. Ubah BACKEND_URL di .env jika port berbeda.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const backend = env.BACKEND_URL || "http://localhost:9000";
+  const backend = env.BACKEND_URL || "http://localhost:3000";
 
   return {
     plugins: [react()],

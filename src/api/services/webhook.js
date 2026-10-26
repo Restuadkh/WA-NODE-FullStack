@@ -54,7 +54,7 @@ function notify(event, device, data) {
     "X-Webhook-Event": event,
     "X-Webhook-Id": id,
   };
-  if (secret) headers["X-Signature"] = sign(secret, body);
+  if (secret) headers["X-Signature"] = secret;
   console.debug({ url, event, device_id: device.id, body, headers }, "Mengirim webhook");
   fetch(url, {
     method: "POST",
@@ -62,8 +62,8 @@ function notify(event, device, data) {
     body,
     signal: AbortSignal.timeout(config.webhook.timeoutMs),
   })
-  .then((res) => {
-    if (!res.ok) {
+  .then((res) => { // Memeriksa respons webhook
+    if (!res.ok) { // jika respons webhook bukan 2xx, anggap ditolak
       logger.warn({ status: res.status, event }, "Webhook ditolak penerima");
       return;
     }
