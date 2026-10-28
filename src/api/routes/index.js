@@ -12,6 +12,7 @@ const chats = require("../controllers/chats.controller");
 const rules = require("../controllers/rules.controller");
 const gateway = require("../controllers/gateway.controller");
 const queue = require("../controllers/queue.controller");
+const users = require("../controllers/users.controller");
 
 const router = express.Router();
 const admin = requireRole("admin");
@@ -61,7 +62,7 @@ message.post("/queue/mediaurl", enqueueOnly, queue.enqueueMediaUrl);
 router.use("/message", message);
 
 // ---- Dashboard (JWT). Hanya path dashboard yang dijaga, sehingga path tak dikenal tetap 404.
-router.use(["/devices", "/chats", "/rules", "/jobs"], authMiddleware);
+router.use(["/devices", "/chats", "/rules", "/jobs", "/users"], authMiddleware);
 
 router.get("/devices", devices.listDevices);
 router.post("/devices", admin, devices.createDevice);
@@ -87,5 +88,12 @@ router.get("/devices/:deviceId/jobs", queue.listJobs);
 router.get("/devices/:deviceId/jobs/stats", queue.jobStats);
 router.delete("/jobs/:id", admin, queue.cancelJob);
 router.post("/jobs/:id/retry", admin, queue.retryJob);
+
+// ---- Manajemen user (admin): kelola akun dashboard & penugasan device (ACL)
+router.get("/users", admin, users.listUsers);
+router.post("/users", admin, users.createUser);
+router.put("/users/:id", admin, users.updateUser);
+router.patch("/users/:id", admin, users.updateUser);
+router.delete("/users/:id", admin, users.deleteUser);
 
 module.exports = router;

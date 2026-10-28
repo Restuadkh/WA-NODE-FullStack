@@ -37,6 +37,16 @@ export default function Layout() {
             <Icon d="M13 2L3 14h8l-1 8 10-12h-8z" />
             <span>Auto-reply</span>
           </NavLink>
+          {user?.role === "admin" && (
+            <NavLink to="/users" aria-label="Pengguna" title="Pengguna" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Icon d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+              <span>Pengguna</span>
+            </NavLink>
+          )}
+          <NavLink to="/api-docs" aria-label="API" title="Dokumentasi API" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <Icon d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            <span>Dok API</span>
+          </NavLink>
         </nav>
 
         <div className="sidebar-foot">

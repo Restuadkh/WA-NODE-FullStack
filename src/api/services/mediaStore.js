@@ -55,21 +55,62 @@ function extensionFor({ mimetype, filename, type }) {
 
 const deviceDir = (deviceId) => path.join(config.media.dir, safeName(deviceId));
 
-const secret = () => config.media.tokenSecret || "wa-media";
+const secret = () => {
+  const s = config.media.tokenSecret;
+  if (!s) throw new Error("MEDIA_TOKEN_SECRET/JWT_SECRET kosong — URL media tidak bisa ditandatangani");
+  return s;
+};
 
-function signature(deviceId, filename) {
-  return crypto.createHmac("sha256", secret()).update(`${deviceId}/${filename}`).digest("hex").slice(0, 40);
+// URL media punya masa berlaku (MEDIA_URL_EXPIRY_HOURS, default 7 hari): token HMAC
+// mencakup waktu kedaluwarsa sehingga URL lama otomatis mati setelah lewat.
+function signature(deviceId, filename, exp) {
+  return crypto
+    .createHmac("sha256", secret())
+    .update(`${deviceId}/${filename}/${exp}`)
+    .digest("hex")
+    .slice(0, 40);
 }
 
-function verify(deviceId, filename, token) {
-  const expected = signature(deviceId, filename);
+function expiryAt() {
+  return Date.now() + (config.media.urlExpiryMs || 7 * 24 * 60 * 60 * 1000);
+}
+
+function verify(deviceId, filename, token, exp) {
+  const expires = Number(exp);
+  if (!Number.isFinite(expires) || expires < Date.now()) return false;
+  const expected = signature(deviceId, filename, expires);
   const given = String(token || "");
   if (given.length !== expected.length) return false;
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(given));
 }
 
 function publicUrl(deviceId, filename) {
-  return `/media/${encodeURIComponent(deviceId)}/${encodeURIComponent(filename)}?t=${signature(deviceId, filename)}`;
+  const exp = expiryAt();
+  return `/media/${encodeURIComponent(deviceId)}/${encodeURIComponent(filename)}?e=${exp}&t=${signature(deviceId, filename, exp)}`;
+}
+
+// Perbarui tanda tangan URL media dari DB (URL lama bisa sudah kedaluwarsa).
+// Return URL segar atau null bila tidak bisa diparse.
+function refreshUrl(stored) {
+  try {
+    if (!stored) return null;
+    const path = String(stored).split("?")[0];
+    const [, deviceId, filename] = path.split("/").map((s) => decodeURIComponent(s));
+    if (!deviceId || !filename) return null;
+    return publicUrl(deviceId, filename);
+  } catch {
+    return null;
+  }
+}
+
+// Terima array/objek Message Sequelize -> salin data + media_url segar.
+function refreshUrls(rows) {
+  const list = Array.isArray(rows) ? rows.map((r) => r.toJSON()) : null;
+  if (!list) return rows;
+  for (const row of list) {
+    if (row.media_url) row.media_url = refreshUrl(row.media_url);
+  }
+  return list;
 }
 
 // Simpan buffer media. Mengembalikan metadata siap disimpan ke kolom media_*.
@@ -130,6 +171,8 @@ module.exports = {
   resolve,
   verify,
   publicUrl,
+  refreshUrl,
+  refreshUrls,
   removeDeviceMedia,
   signature,
   extensionFor,

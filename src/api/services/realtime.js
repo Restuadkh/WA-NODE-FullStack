@@ -3,8 +3,17 @@ const { Server } = require("socket.io");
 const config = require("../../config/config");
 const logger = require("./logger");
 const { JWT_ALGORITHMS } = require("../middlewares/auth");
+const { allowedDeviceIds } = require("./deviceAccess");
 
 let io = null;
+
+// Cek ACL untuk socket. Cache hasil per socket agar tidak query setiap join.
+// Admin tanpa penugasan = akses semua (null); lainnya dibatasi device yang ditugaskan.
+const canAccess = async (socket, user, deviceId) => {
+  if (!user) return false;
+  socket.data.allowed ??= new Set(await allowedDeviceIds(user));
+  return socket.data.allowed === null || socket.data.allowed.has(deviceId);
+};
 
 // Event ke dashboard:
 //   device:status  { device_id, status }                  -> semua client
@@ -27,9 +36,12 @@ function initRealtime(httpServer) {
     }
   });
 
-  io.on("connection", (socket) => {
-    socket.on("join:device", (deviceId) => {
-      if (typeof deviceId === "string") socket.join(`device:${deviceId}`);
+  io.on("connection", async (socket) => {
+    // ACL: agent hanya boleh join room device yang ditugaskan kepadanya.
+    // Admin (null) boleh join semua. Dicek ulang saat join, bukan hanya saat connect.
+    socket.on("join:device", async (deviceId) => {
+      if (typeof deviceId !== "string") return;
+      if (await canAccess(socket, socket.data.user, deviceId)) socket.join(`device:${deviceId}`);
     });
     socket.on("leave:device", (deviceId) => {
       if (typeof deviceId === "string") socket.leave(`device:${deviceId}`);

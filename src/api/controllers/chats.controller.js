@@ -2,8 +2,10 @@ const { Op } = require("sequelize");
 const { Chat, Message, Device } = require("../models");
 const manager = require("../whatsapp/manager");
 const { sendAndStore, PREVIEW } = require("../services/messageService");
+const mediaStore = require("../services/mediaStore");
+const { assertDeviceAccess } = require("../services/deviceAccess");
 
-const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
+const httpError = require("../services/httpError");
 const MAX_TEXT = 4096;
 const MEDIA_TYPES = ["image", "video", "audio", "sticker", "document"];
 
@@ -19,12 +21,21 @@ function detectMediaType(file) {
 }
 
 async function listChats(req, res) {
+  await assertDeviceAccess(req.user, req.params.deviceId);
   const chats = await Chat.findAll({
     where: { device_id: req.params.deviceId },
     order: [["last_message_at", "DESC"]],
     limit: 500,
   });
   res.json({ error: false, data: chats });
+}
+
+// ACL: chat dicari lewat chatId, jadi akses dicek lewat device pemilik chat.
+async function findChatWithAccess(chatId, user) {
+  const chat = await Chat.findByPk(chatId, { include: Device });
+  if (!chat) throw httpError("Chat tidak ditemukan", 404);
+  await assertDeviceAccess(user, chat.device_id);
+  return chat;
 }
 
 // Pesan terbaru (urut lama -> baru). ?limit=200 (maks 500), ?before=<ISO date> untuk halaman sebelumnya.
@@ -43,13 +54,14 @@ async function listMessages(req, res) {
     ],
     limit,
   });
-  res.json({ error: false, data: rows.reverse() });
+  const chat = await Chat.findByPk(req.params.chatId, { attributes: ["device_id"] });
+  if (chat) await assertDeviceAccess(req.user, chat.device_id);
+  res.json({ error: false, data: mediaStore.refreshUrls(rows.reverse()) });
 }
 
 // Kirim teks (JSON) atau media (multipart field "file" + type/caption/ptt).
 async function sendMessage(req, res) {
-  const chat = await Chat.findByPk(req.params.chatId, { include: Device });
-  if (!chat) throw httpError("Chat tidak ditemukan", 404);
+  const chat = await findChatWithAccess(req.params.chatId, req.user);
 
   const instance = manager.get(chat.Device.instance_key);
   if (!instance?.online) throw httpError("Device belum terhubung ke WhatsApp", 409);
@@ -114,9 +126,37 @@ async function sendMessage(req, res) {
 }
 
 async function markRead(req, res) {
-  const chat = await Chat.findByPk(req.params.chatId);
-  if (!chat) throw httpError("Chat tidak ditemukan", 404);
+  const chat = await findChatWithAccess(req.params.chatId, req.user);
   if (chat.unread_count) await chat.update({ unread_count: 0 });
+
+  // Tandai dibaca juga di WhatsApp agar centang di ponsel ikut berubah.
+  try {
+    const instance = manager.get(chat.Device?.instance_key);
+    if (instance?.online && !chat.is_group) {
+      const unread = await Message.findAll({
+        attributes: ["wa_message_id", "createdAt"],
+        where: { chat_id: chat.id, direction: "incoming", status: { [Op.ne]: "read" }, wa_message_id: { [Op.ne]: null } },
+        order: [["createdAt", "ASC"]],
+        limit: 100,
+      });
+      const keys = unread.map((m) => ({
+        remoteJid: chat.wa_jid,
+        id: m.wa_message_id,
+        fromMe: false,
+        messageTimestamp: Math.floor(new Date(m.createdAt).getTime() / 1000),
+      }));
+      if (keys.length) await instance.sock?.readMessages?.(keys);
+      if (unread.length) {
+        await Message.update(
+          { status: "read" },
+          { where: { chat_id: chat.id, direction: "incoming", status: { [Op.ne]: "read" } } },
+        );
+      }
+    }
+  } catch (err) {
+    // Gagal sinkron ke WhatsApp tidak boleh menggagalkan penandaan di dashboard.
+  }
+
   res.json({ error: false, data: chat });
 }
 

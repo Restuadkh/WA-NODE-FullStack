@@ -190,6 +190,28 @@ h2 { font-size: 17px; }
 .modal-head h2 { margin-bottom: 6px; }
 .modal-head p { margin: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+.check-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.check-item { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+
+/* Halaman dokumentasi API */
+.docs-card { padding: 18px 20px; margin-bottom: 14px; }
+.docs-card h2 { margin-bottom: 4px; }
+.docs-card h3 { margin: 14px 0 4px; font-size: 14px; }
+.docs pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 8px 0;
+  white-space: pre;
+}
+.docs code.inline { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+.docs table { width: 100%; font-size: 13px; }
+.docs .method { font-family: monospace; font-weight: 700; }
 .form-hint { flex-basis: 100%; margin: 4px 0 0; }
 .qr-area { display: grid; place-items: center; min-height: 280px; background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
 .qr-img { width: 100%; max-width: 280px; height: auto; image-rendering: pixelated; }

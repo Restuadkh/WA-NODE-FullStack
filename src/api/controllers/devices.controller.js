@@ -1,10 +1,14 @@
 const { randomUUID } = require("crypto");
-const { Device, Chat, Message, AutoReplyRule, MessageJob } = require("../models");
+const sequelize = require("../../config/database");
+const { Op } = require("sequelize");
+const config = require("../../config/config");
+const { Device, Chat, Message, AutoReplyRule, MessageJob, DeviceAgent } = require("../models");
 const manager = require("../whatsapp/manager");
 const mediaStore = require("../services/mediaStore");
 const logger = require("../services/logger");
+const { assertDeviceAccess, allowedDeviceIds } = require("../services/deviceAccess");
 
-const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
+const httpError = require("../services/httpError");
 
 const WEBHOOK_URL_MAX = 500;
 const WEBHOOK_SECRET_MAX = 255;
@@ -62,13 +66,23 @@ async function findDevice(id) {
   return device;
 }
 
-// Jalankan instance di latar belakang; hasilnya dipantau lewat status/QR
-function startInBackground(device) {
-  manager.ensure(device).catch((err) => logger.error({ err, device: device.id }, "Gagal menjalankan instance"));
+// Jalankan instance di latar belakang; hasilnya dipantau lewat status/QR.
+// Bila percobaan koneksi gagal berulang, diulang otomatis maksimal
+// DEVICE_QR_START_ATTEMPTS kali (default 3), lalu berhenti sampai pengguna mencoba lagi.
+function startInBackground(device, opts = {}) {
+  const maxAttempts = opts.maxAttempts ?? config.whatsapp.qrStartMaxAttempts;
+  manager
+    .ensure(device, maxAttempts > 0 ? { maxAttempts } : {})
+    .catch((err) => logger.error({ err, device: device.id }, "Gagal menjalankan instance"));
 }
 
 async function listDevices(req, res) {
-  const devices = await Device.findAll({ order: [["createdAt", "DESC"]] });
+  // ACL: agent hanya melihat device yang ditugaskan kepadanya.
+  const allowed = await allowedDeviceIds(req.user);
+  const devices = await Device.findAll({
+    where: allowed ? { id: { [Op.in]: allowed } } : undefined,
+    order: [["createdAt", "DESC"]],
+  });
   res.json({ error: false, data: devices.map((d) => serialize(d, req.user)) });
 }
 
@@ -85,6 +99,9 @@ async function createDevice(req, res) {
     status: "pending_qr",
     ...webhookPatch(req.body || {}),
   });
+  // Admin yang dibatasi per device otomatis mengelola device yang ia buat.
+  const allowed = await allowedDeviceIds(req.user);
+  if (allowed) await DeviceAgent.create({ user_id: req.user.id, device_id: device.id });
   startInBackground(device);
   res.status(201).json({ error: false, data: serialize(device, req.user) });
 }
@@ -93,6 +110,7 @@ async function createDevice(req, res) {
 // webhook_secret: "" untuk menghapus secret.
 async function updateDevice(req, res) {
   const device = await findDevice(req.params.id);
+  await assertDeviceAccess(req.user, device.id);
   const body = req.body || {};
   const patch = webhookPatch(body);
 
@@ -109,14 +127,17 @@ async function updateDevice(req, res) {
   res.json({ error: false, data: serialize(device, req.user) });
 }
 
-// Status + QR / pairing code. Memulai instance bila belum berjalan (mis. setelah restart server).
+// Status + QR / pairing code. Memulai instance bila belum berjalan (mis. setelah restart
+// server), juga untuk device offline/disconnected: retry otomatis terbatas (default 3x,
+// setelah itu berhenti — buka lagi tombol Tautkan untuk mencoba dari awal).
 async function getDeviceQr(req, res) {
   const device = await findDevice(req.params.id);
+  await assertDeviceAccess(req.user, device.id);
   let instance = manager.get(device.instance_key);
   // start() aman dipanggil berulang (tidak melakukan apa pun bila socket sudah ada). Dipanggil juga
   // untuk instance yang terputus / logout / QR-nya kedaluwarsa, supaya QR baru dibuat tanpa restart server.
   if (!instance?.online) {
-    startInBackground(device);
+    startInBackground(device, { maxAttempts: config.whatsapp.qrStartMaxAttempts });
     instance = manager.get(device.instance_key);
   }
   res.json({
@@ -125,30 +146,41 @@ async function getDeviceQr(req, res) {
       status: instance?.status || device.status,
       qr: instance?.qr || null,
       pairing_code: instance?.pairingCode || null,
+      // Sesi retry terbatas (null = tidak sedang mencoba / sudah berhenti)
+      attempts: instance?.info().bounded ?? null,
     },
   });
 }
 
 async function getDeviceStatus(req, res) {
   const device = await findDevice(req.params.id);
+  await assertDeviceAccess(req.user, device.id);
   res.json({
     error: false,
     data: { status: device.status, phone_number: device.phone_number },
   });
 }
 
-// Logout dari WhatsApp lalu hapus device beserta chat dan rule-nya
+// Logout dari WhatsApp lalu hapus device beserta chat dan rule-nya.
+// Semua penghapusan DB dalam satu transaksi agar tidak ada data yang setengah terhapus.
 async function removeDevice(req, res) {
   const device = await findDevice(req.params.id);
+  await assertDeviceAccess(req.user, device.id);
   await manager.remove(device);
 
-  const chatIds = (await Chat.findAll({ where: { device_id: device.id }, attributes: ["id"] })).map((c) => c.id);
-  if (chatIds.length) await Message.destroy({ where: { chat_id: chatIds } });
-  await Chat.destroy({ where: { device_id: device.id } });
-  await AutoReplyRule.destroy({ where: { device_id: device.id } });
-  await MessageJob.destroy({ where: { device_id: device.id } });
+  await sequelize.transaction(async (t) => {
+    const chatIds = (
+      await Chat.findAll({ where: { device_id: device.id }, attributes: ["id"], transaction: t })
+    ).map((c) => c.id);
+    if (chatIds.length) await Message.destroy({ where: { chat_id: chatIds }, transaction: t });
+    await Chat.destroy({ where: { device_id: device.id }, transaction: t });
+    await AutoReplyRule.destroy({ where: { device_id: device.id }, transaction: t });
+    await MessageJob.destroy({ where: { device_id: device.id }, transaction: t });
+    await DeviceAgent.destroy({ where: { device_id: device.id }, transaction: t });
+    await device.destroy({ transaction: t });
+  });
+  // File media di disk dihapus setelah DB berhasil (gagal hapus file tidak fatal).
   await mediaStore.removeDeviceMedia(device.id);
-  await device.destroy();
 
   res.json({ error: false, message: "Device dihapus" });
 }

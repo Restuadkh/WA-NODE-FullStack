@@ -13,13 +13,14 @@
 const sequelize = require("../config/database");
 require("../api/models");
 const { ensureIndexes } = require("../api/services/dbIndexes");
-const { ensureMediaSchema, ensureDeviceWebhookSchema } = require("../api/services/dbSchema");
+const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns } = require("../api/services/dbSchema");
 
 async function run({ dryRun = false, log = console.log } = {}) {
   await sequelize.authenticate();
   if (!dryRun) await sequelize.sync(); // buat tabel yang belum ada (tidak mengubah yang sudah ada)
   await ensureMediaSchema({ dryRun, log });
   await ensureDeviceWebhookSchema({ dryRun, log });
+  await ensureJobClaimColumns({ dryRun, log });
   await ensureIndexes({ dedupe: true, dryRun, log });
   log(dryRun ? "Dry-run selesai (tidak ada perubahan)." : "Upgrade database selesai.");
 }

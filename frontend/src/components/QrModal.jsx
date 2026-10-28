@@ -56,6 +56,17 @@ export default function QrModal({ device, onClose, onConnected }) {
 
   const connected = status === "connected";
   const pairing = info?.pairing_code;
+  const retrying = info?.attempts;
+  const cooldown = info?.cooldown_ms;
+
+  // Keterangan koneksi otomatis: sedang mencoba (x/N), menunggu cooldown, atau menunggu QR.
+  const retryNote = connected
+    ? null
+    : cooldown
+      ? `Gagal terhubung setelah ${retrying?.attempts_max || 3} percobaan. Coba lagi dalam ${Math.ceil(cooldown / 1000)} detik.`
+      : retrying
+        ? `Menghubungkan ulang otomatis… percobaan ${retrying.attempts_used + 1}/${retrying.attempts_max}`
+        : null;
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -101,6 +112,7 @@ export default function QrModal({ device, onClose, onConnected }) {
             )}
           </ol>
         )}
+        {!connected && retryNote && <p className="muted small">{retryNote}</p>}
         {!connected && error && info && <p className="muted small">{error}</p>}
       </div>
     </div>

@@ -1,5 +1,6 @@
 const { AutoReplyRule } = require("../models");
 const { findDevice, httpError } = require("./devices.controller");
+const { assertDeviceAccess } = require("../services/deviceAccess");
 
 const MATCH_TYPES = ["exact", "contains", "starts_with"];
 
@@ -35,6 +36,7 @@ async function findRule(id) {
 }
 
 async function listRules(req, res) {
+  await assertDeviceAccess(req.user, req.params.deviceId);
   const rules = await AutoReplyRule.findAll({
     where: { device_id: req.params.deviceId },
     order: [

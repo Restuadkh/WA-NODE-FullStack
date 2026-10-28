@@ -101,6 +101,8 @@ test("unit: toJid, parseContent, matches", () => {
   assert.equal(toJid("+62 812 3456 789"), "628123456789@s.whatsapp.net");
   assert.equal(toJid("1203630@g.us"), "1203630@g.us");
   assert.throws(() => toJid("12"), /tidak valid/);
+  assert.throws(() => toJid("bukan@jid"), /tidak valid/);
+  assert.equal(toJid("628111111111@lid"), "628111111111@lid");
 
   assert.deepEqual(parseContent({ conversation: "halo" }), { type: "text", body: "halo" });
   assert.deepEqual(parseContent({ extendedTextMessage: { text: "reply" } }), { type: "text", body: "reply" });
@@ -154,10 +156,17 @@ test("device: hak akses, pembuatan, dan penyembunyian instance_key", async () =>
   assert.ok(created.body.data.instance_key);
   device = await Device.findByPk(created.body.data.id);
 
+  // ACL: agent ditugaskan ke device ini agar bisa melihat chat-nya.
+  const { DeviceAgent } = require("../src/api/models");
+  const agentUser = await User.findOne({ where: { email: "agen@test.id" } });
+  await DeviceAgent.create({ user_id: agentUser.id, device_id: device.id });
+
   const asAdmin = await call("GET", "/api/devices", { token: adminToken });
   const asAgent = await call("GET", "/api/devices", { token: agentToken });
   assert.ok(asAdmin.body.data[0].instance_key);
-  assert.equal(asAgent.body.data[0].instance_key, undefined);
+  const agentView0 = asAgent.body.data.find((d) => d.id === device.id);
+  assert.ok(agentView0, "agent melihat device yang ditugaskan");
+  assert.equal(agentView0.instance_key, undefined);
 
   const qr = await call("GET", `/api/devices/${device.id}/qr`, { token: adminToken });
   assert.equal(qr.status, 200);
@@ -195,8 +204,15 @@ test("device: webhook per device disimpan, disembunyikan dari agent, dan bisa di
   assert.equal(created.body.data.webhook_secret, "rahasia-webhook");
   assert.equal(created.body.data.webhook_configured, true);
 
-  const asAgent = await call("GET", "/api/devices", { token: agentToken });
-  const agentView = asAgent.body.data.find((d) => d.id === created.body.data.id);
+  // ACL: agent hanya melihat device yang ditugaskan; device ini belum ditugaskan.
+  assert.equal((await call("GET", "/api/devices", { token: agentToken })).body.data.find((d) => d.id === created.body.data.id), undefined);
+  const { DeviceAgent } = require("../src/api/models");
+  const agentUser = await User.findOne({ where: { email: "agen@test.id" } });
+  await DeviceAgent.create({ user_id: agentUser.id, device_id: created.body.data.id });
+  const agentView = (await call("GET", "/api/devices", { token: agentToken })).body.data.find(
+    (d) => d.id === created.body.data.id,
+  );
+  assert.ok(agentView, "device yang ditugaskan terlihat oleh agent");
   assert.equal(agentView.webhook_url, undefined);
   assert.equal(agentView.webhook_secret, undefined);
   assert.equal(agentView.webhook_configured, true);
@@ -343,10 +359,14 @@ test("media masuk: diunduh, disimpan, dan disajikan dengan URL bertanda tangan",
 
   const [, , mediaDevice, mediaFile] = stored.media_url.split("/");
   const [diskFile, query] = mediaFile.split("?");
-  const token = new URLSearchParams(query).get("t");
-  assert.equal(mediaStore.verify(mediaDevice, diskFile, token), true);
+  const params = new URLSearchParams(query);
+  const token = params.get("t");
+  const exp = params.get("e");
+  assert.equal(mediaStore.verify(mediaDevice, diskFile, token, exp), true);
   assert.ok(mediaStore.resolve(mediaDevice, diskFile));
-  assert.equal(mediaStore.verify(mediaDevice, diskFile, "salah"), false);
+  assert.equal(mediaStore.verify(mediaDevice, diskFile, "salah", exp), false);
+  // URL kedaluwurs ditolak
+  assert.equal(mediaStore.verify(mediaDevice, diskFile, token, String(Date.now() - 1000)), false);
 
   const served = await fetch(`${base}${stored.media_url}`);
   assert.equal(served.status, 200);
@@ -534,7 +554,10 @@ test("gateway API: key, normalisasi nomor, nomor tidak terdaftar, device offline
   assert.ok(latest.media_url);
   const [, , mediaDevice, mediaFile] = latest.media_url.split("/");
   const [diskFile, query] = mediaFile.split("?");
-  assert.equal(mediaStore.verify(mediaDevice, diskFile, new URLSearchParams(query).get("t")), true);
+  assert.equal(
+    mediaStore.verify(mediaDevice, diskFile, new URLSearchParams(query).get("t"), new URLSearchParams(query).get("e")),
+    true,
+  );
   assert.equal(latest.media_mimetype, "image/jpeg");
 
   instance.status = "disconnected";
@@ -727,6 +750,29 @@ test("reconnect: timer tiap instance terpisah, stop sesi lain tidak membatalkann
   b.stop();
 });
 
+test("start terbatas: retry otomatis maksimal 3x lalu berhenti + cooldown", async () => {
+  const { WhatsAppInstance } = require("../src/api/whatsapp/instance");
+  const a = new WhatsAppInstance({ key: "bounded-x" });
+  a.start = () => Promise.resolve(a); // stub: tidak benar-benar konek
+  a.authState = { creds: { registered: false } };
+
+  // Sesi terbatas disiapkan manual (start() asli dinonaktifkan karena WHATSAPP_ENABLED=false di test)
+  a.bounded = { max: 3, count: 0 };
+  const close = () => a._onClose({ output: { statusCode: 428 } }); // koneksi gagal umum
+
+  await close(); // percobaan 1
+  await close(); // percobaan 2
+  assert.ok(a.bounded, "masih dalam sesi setelah 2 percobaan");
+  assert.ok(a.reconnectTimer, "percobaan ke-3 terjadwal otomatis");
+
+  await close(); // percobaan 3 = batas
+  assert.equal(a.bounded, null, "sesi berhenti setelah 3 percobaan");
+  assert.equal(a.reconnectTimer, null);
+  assert.ok(a.boundedCooldownUntil > Date.now(), "cooldown aktif setelah gagal");
+
+  a.stop(); // bersihkan timer & status
+});
+
 test("hapus device: hanya admin, membersihkan chat/pesan/rule", async () => {
   assert.equal((await call("DELETE", `/api/devices/${device.id}`, { token: agentToken })).status, 403);
   assert.equal((await call("DELETE", `/api/devices/${device.id}`, { token: adminToken })).status, 200);
@@ -735,3 +781,74 @@ test("hapus device: hanya admin, membersihkan chat/pesan/rule", async () => {
   assert.equal(await Message.count(), 0);
   assert.equal((await call("GET", `/api/devices/${device.id}/qr`, { token: adminToken })).status, 404);
 });
+
+test("manajemen user: buat, penugasan device, dan hapus", async () => {
+  const created = await call("POST", "/api/users", {
+    token: adminToken,
+    body: { name: "Agen Dua", email: "agen2@test.id", password: "rahasia123", role: "agent", device_ids: [] },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.data.role, "agent");
+  const uid = created.body.data.id;
+
+  // email duplikat ditolak, password pendek ditolak
+  assert.equal((await call("POST", "/api/users", { token: adminToken, body: { name: "X", email: "agen2@test.id", password: "rahasia123" } })).status, 409);
+  assert.equal((await call("POST", "/api/users", { token: adminToken, body: { name: "X", email: "x@x.id", password: "123" } })).status, 400);
+  // hanya admin
+  assert.equal((await call("GET", "/api/users", { token: agentToken })).status, 403);
+
+  // device baru + penugasan
+  const dev = await call("POST", "/api/devices", { token: adminToken, body: { name: "Dev ACL" } });
+  const deviceId = dev.body.data.id;
+  const updated = await call("PUT", `/api/users/${uid}`, { token: adminToken, body: { device_ids: [deviceId] } });
+  assert.deepEqual(updated.body.data.device_ids, [deviceId]);
+
+  const agen2Token = (await call("POST", "/api/auth/login", { body: { email: "agen2@test.id", password: "rahasia123" } })).body.token;
+  // agent hanya melihat device yang ditugaskan, dan chat device lain = 404 (bukan 403)
+  const list = await call("GET", "/api/devices", { token: agen2Token });
+  assert.deepEqual(list.body.data.map((d) => d.id), [deviceId]);
+  assert.equal((await call("GET", `/api/devices/${deviceId}/chats`, { token: agen2Token })).status, 200);
+  const other = await call("POST", "/api/devices", { token: adminToken, body: { name: "Dev Lain" } });
+  assert.equal((await call("GET", `/api/devices/${other.body.data.id}/chats`, { token: agen2Token })).status, 404);
+
+  // Admin juga bisa dibatasi per device; admin TANPA penugasan = akses penuh.
+  const admin2 = await call("POST", "/api/users", {
+    token: adminToken,
+    body: { name: "Admin Cabang", email: "admin2@test.id", password: "rahasia123", role: "admin", device_ids: [deviceId] },
+  });
+  assert.equal(admin2.status, 201);
+  const admin2Token = (await call("POST", "/api/auth/login", { body: { email: "admin2@test.id", password: "rahasia123" } })).body.token;
+  const scoped = await call("GET", "/api/devices", { token: admin2Token });
+  assert.deepEqual(scoped.body.data.map((d) => d.id), [deviceId], "admin dengan penugasan hanya melihat device itu");
+  assert.equal((await call("GET", `/api/devices/${other.body.data.id}/chats`, { token: admin2Token })).status, 404);
+  assert.equal((await call("PUT", `/api/devices/${other.body.data.id}`, { token: admin2Token, body: { name: "X" } })).status, 404);
+  assert.equal((await call("DELETE", `/api/devices/${other.body.data.id}`, { token: admin2Token })).status, 404);
+  // device yang ia buat otomatis jadi miliknya
+  const madeByScoped = await call("POST", "/api/devices", { token: admin2Token, body: { name: "Buat Sendiri" } });
+  assert.equal(madeByScoped.status, 201);
+  assert.equal((await call("GET", `/api/devices/${madeByScoped.body.data.id}/qr`, { token: admin2Token })).status, 200);
+  await call("DELETE", `/api/devices/${madeByScoped.body.data.id}`, { token: admin2Token });
+
+  // agent TANPA penugasan tidak melihat device apa pun
+  const agen3 = await call("POST", "/api/users", {
+    token: adminToken,
+    body: { name: "Agen Tanpa Device", email: "agen3@test.id", password: "rahasia123", role: "agent" },
+  });
+  assert.equal(agen3.status, 201);
+  const agen3Token = (await call("POST", "/api/auth/login", { body: { email: "agen3@test.id", password: "rahasia123" } })).body.token;
+  assert.deepEqual((await call("GET", "/api/devices", { token: agen3Token })).body.data, []);
+
+  // Hapus admin2 dulu agar admin utama jadi satu-satunya, lalu uji proteksi admin-terakhir.
+  assert.equal((await call("DELETE", `/api/users/${admin2.body.data.id}`, { token: adminToken })).status, 200);
+
+  // admin terakhir tidak boleh diturunkan/dihapus
+  const adminUser = await User.findOne({ where: { email: "admin@test.id" } });
+  assert.equal((await call("PUT", `/api/users/${adminUser.id}`, { token: adminToken, body: { role: "agent" } })).status, 409);
+  assert.equal((await call("DELETE", `/api/users/${adminUser.id}`, { token: adminToken })).status, 409);
+
+  assert.equal((await call("DELETE", `/api/users/${uid}`, { token: adminToken })).status, 200);
+  assert.equal((await call("DELETE", `/api/users/${agen3.body.data.id}`, { token: adminToken })).status, 200);
+  assert.equal((await call("DELETE", `/api/devices/${deviceId}`, { token: adminToken })).status, 200);
+  assert.equal((await call("DELETE", `/api/devices/${other.body.data.id}`, { token: adminToken })).status, 200);
+});
+

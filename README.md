@@ -1,21 +1,25 @@
 # WA Dashboard
 
-Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersama tim secara realtime, auto-reply, dan API kirim pesan untuk aplikasi lain.
+Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersama tim secara realtime, auto-reply, dan API kirim pesan untuk aplikasi lain. Riwayat perubahan: **[CHANGELOG.md](CHANGELOG.md)**.
 
 - **Backend**: Node.js ≥ 20, Express 5, Sequelize (MySQL/MariaDB), socket.io, Baileys
 - **Frontend**: React + Vite di `frontend/` (build butuh Node ≥ 20.19; hasil build disajikan backend, satu proses satu port)
 
-> Versi **2.4** — antrean pesan keluar (anti-ban) dengan jeda acak & kuota per device. Sebelumnya: webhook per device (2.3), media penuh dan reconnect per sesi (2.2). **Pengguna lama: baca bagian [Upgrade dari v2.0](#upgrade-dari-v20).**
+> Versi **2.5** — ACL per device (agent hanya melihat device yang ditugaskan), manajemen user di dashboard, URL media berkedaluwarsa, dan perbaikan webhook HMAC. Sebelumnya: antrean pesan keluar anti-ban (2.4), webhook per device (2.3), media penuh dan reconnect per sesi (2.2). **Pengguna lama: baca bagian [Upgrade dari v2.0](#upgrade-dari-v20).**
 
 ## Fitur
 - Login JWT, role `admin` (kelola device, tautkan QR, rule) dan `agent` (balas chat)
+- **ACL per device untuk SEMUA role**: admin/agent hanya melihat device yang ditugaskan admin (halaman **Pengguna**); admin tanpa penugasan = akses penuh. Realtime socket ikut dibatasi
+- **Manajemen user di dashboard** (admin): tambah/edit/hapus akun, ganti role & password, tugaskan device
 - Device: tautkan lewat QR atau kode pairing, status realtime, hapus (logout + bersihkan data)
+  - Membuka QR pada device offline/disconnected memicu **auto-reconnect terbatas** (default 3 percobaan, `DEVICE_QR_START_ATTEMPTS`), lalu berhenti + cooldown 60 detik — bukan retry tanpa akhir
 - Inbox: chat pribadi & grup, teks, **gambar, video, stiker, audio/voice note, dan dokumen** (terima & kirim), centang terkirim/diterima/dibaca, badge belum dibaca bersama
 - Auto-reply berbasis kata kunci (exact / contains / starts_with / `*`), per device, dengan batas balasan per menit
 - API kirim pesan untuk aplikasi lain: teks, gambar, video, audio, voice note, stiker, dokumen, media dari URL
 - Reconnect otomatis **per sesi** dengan backoff + jitter; satu sesi yang terputus tidak memutus/menahan sesi lain
 - Webhook keluar (opsional, dapat ditandatangani HMAC) untuk pesan masuk, **update status pesan** (terkirim/diterima/dibaca), dan status koneksi, **diatur per device** dari dashboard (fallback `WEBHOOK_URL` global)
 - **Antrean pesan keluar (anti-ban)**: kirim lewat `POST /api/message/queue` — jeda acak 8–25 detik, satu pesan sekaligus per device, kuota rolling per jam/24 jam, jam kirim, simulasi mengetik, retry backoff, dan halaman **Antrian** di dashboard. Device boleh offline saat enqueue; job tetap ada setelah restart. Panduan: **[QUEUE.md](QUEUE.md)**
+- **Halaman Dok API** di dashboard: ringkasan penggunaan `/api/message/*` beserta contoh request/response (detail lengkap di **[RES-API.md](RES-API.md)**)
 
 ## Instalasi
 ```bash
@@ -83,7 +87,7 @@ curl -X POST "https://wa.contoh.com/api/message/queue" \
 ```
 Endpoint `queue`, `queue/batch`, `queue/media`, `queue/mediaurl`; job dipantau/dibatalkan di halaman **Antrian**. Detail & batas anti-ban: **[QUEUE.md](QUEUE.md)**.
 
-**Media masuk/keluar**: file disimpan di `MEDIA_DIR` (default `src/media/`) dan disajikan lewat URL bertanda tangan HMAC (`/media/...?t=...`), bukan folder publik terbuka. Metadata (MIME, nama file, ukuran, dimensi, durasi, voice note, caption) disimpan di tabel `messages`. Kolom baru dipasang otomatis saat start (dan oleh `npm run db:upgrade`); file media tidak ikut di database — backup folder `MEDIA_DIR` bersama database.
+**Media masuk/keluar**: file disimpan di `MEDIA_DIR` (default `src/media/`) dan disajikan lewat URL bertanda tangan HMAC dengan masa berlaku (`MEDIA_URL_EXPIRY_HOURS`, default 7 hari) — bukan folder publik terbuka. URL diperbarui otomatis setiap inbox dibuka. Metadata (MIME, nama file, ukuran, dimensi, durasi, voice note, caption) disimpan di tabel `messages`. Kolom baru dipasang otomatis saat start (dan oleh `npm run db:upgrade`); file media tidak ikut di database — backup folder `MEDIA_DIR` bersama database.
 
 **`/mediaurl`**: server mengunduh file sendiri (maks `MEDIA_URL_MAX_MB`, timeout `MEDIA_URL_TIMEOUT_MS`) lalu mengirimkannya. URL yang mengarah ke alamat internal/privat (loopback, 10.x, 172.16–31.x, 192.168.x, 169.254.x termasuk metadata cloud, IPv6 lokal) **ditolak** dengan HTTP 400, termasuk lewat redirect atau DNS rebinding. Batasi lebih jauh dengan `MEDIA_URL_ALLOWED_HOSTS`.
 
@@ -113,6 +117,8 @@ Perubahan yang perlu disesuaikan di sisi Anda:
 |---|---|
 | Webhook tidak lagi memuat `key` | Pakai `device_id` untuk mengenali device, atau set `WEBHOOK_INCLUDE_KEY=true` sementara |
 | `GET /api/devices/:id/qr` hanya admin | Agent tidak lagi bisa membuka QR/pairing (tombol "Tautkan" disembunyikan untuk agent) |
+| **v2.5: agent hanya melihat device yang ditugaskan** | Tugaskan device ke agent lewat menu **Pengguna**; agent lama tanpa penugasan tidak melihat device apa pun |
+| **v2.5: URL media berkedaluwarsa** | Aplikasi klien harus memakai `media_url` dari response terbaru, bukan menyimpannya permanen |
 | `/mediaurl` mengunduh di server | Pastikan URL publik; alamat internal ditolak. Batas ukuran 25 MB |
 | `CLIENT_PLATFORM`, `CLIENT_BROWSER`, `CLIENT_VERSION` dihapus | Tidak pernah berpengaruh; hapus dari `.env` |
 | Model `Number` → `ContactName` (tabel `numbers` tetap) | Hanya relevan bila Anda memakai kode internal repo ini |

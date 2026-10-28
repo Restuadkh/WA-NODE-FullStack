@@ -16,7 +16,7 @@ require("./api/models");
 const app = require("./app");
 const { initRealtime } = require("./api/services/realtime");
 const { ensureIndexes } = require("./api/services/dbIndexes");
-const { ensureMediaSchema, ensureDeviceWebhookSchema } = require("./api/services/dbSchema");
+const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns } = require("./api/services/dbSchema");
 const manager = require("./api/whatsapp/manager");
 const queueService = require("./api/services/queueService");
 
@@ -35,6 +35,12 @@ async function main() {
     });
     // Kolom webhook per device (v2.3).
     await ensureDeviceWebhookSchema({
+      tolerant: true,
+      log: (m) => logger.debug(m),
+      warn: (m) => logger.warn(m),
+    });
+    // Kolom klaim antrean (v2.5).
+    await ensureJobClaimColumns({
       tolerant: true,
       log: (m) => logger.debug(m),
       warn: (m) => logger.warn(m),

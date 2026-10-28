@@ -23,6 +23,9 @@ const MessageJob = sequelize.define(
     priority: { type: DataTypes.INTEGER, defaultValue: 0 }, // makin besar makin didahulukan
     scheduled_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     attempts: { type: DataTypes.INTEGER, defaultValue: 0 },
+    // Kapan job diklaim worker; dipakai agar job "sending" yang masih diproses
+    // tidak dikira macet saat server lain/restart memeriksa antrean.
+    claimed_at: { type: DataTypes.DATE, allowNull: true },
     max_attempts: { type: DataTypes.INTEGER, defaultValue: 3 },
     next_attempt_at: { type: DataTypes.DATE, allowNull: true },
     last_error: { type: DataTypes.TEXT, allowNull: true },

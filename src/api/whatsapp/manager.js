@@ -51,17 +51,18 @@ function refreshDevice(device) {
   return instance;
 }
 
-// Ambil instance milik device (dibuat bila belum ada) dan pastikan sudah berjalan
-async function ensure(device) {
+// Ambil instance milik device (dibuat bila belum ada) dan pastikan sudah berjalan.
+// opts.maxAttempts = sesi start terbatas (retry otomatis dibatasi, lalu berhenti).
+async function ensure(device, opts = {}) {
   if (shuttingDown) return instances.get(device.instance_key) || null;
   const existing = instances.get(device.instance_key);
   if (existing) {
     existing.device = device;
-    await existing.start();
+    await existing.start(opts);
     return existing;
   }
   const instance = create(device);
-  await instance.start();
+  await instance.start(opts);
   return instance;
 }
 

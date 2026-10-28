@@ -1,6 +1,6 @@
 # Dokumentasi REST API — WA Dashboard
 
-Dokumentasi seluruh endpoint HTTP yang tersedia di aplikasi ini (v2.4.0).
+Dokumentasi seluruh endpoint HTTP yang tersedia di aplikasi ini (v2.5.0). Ringkasan interaktif untuk integrator juga tersedia di dashboard: menu **Dok API** (`/api-docs`).
 
 - **Base URL (lokal)**: `http://localhost:3000`
 - **Base URL (produksi)**: `https://wa.contoh.com` (sesuaikan)
@@ -20,6 +20,7 @@ Dokumentasi seluruh endpoint HTTP yang tersedia di aplikasi ini (v2.4.0).
 5. [API Dashboard — Devices](#5-api-dashboard--devices)
 6. [API Dashboard — Chats & Pesan](#6-api-dashboard--chats--pesan)
 7. [API Dashboard — Auto Reply Rules](#7-api-dashboard--auto-reply-rules)
+   7b. [Manajemen Pengguna (Admin)](#7b-manajemen-pengguna-admin)
 8. [Penyajian Media](#8-penyajian-media)
 9. [Struktur Data](#9-struktur-data)
 10. [Webhook Keluar](#10-webhook-keluar)
@@ -729,7 +730,7 @@ curl -X POST "http://localhost:3000/api/devices" \
 GET /api/devices/:id/qr
 ```
 
-Memulai instance bila belum berjalan (mis. setelah server restart).
+Memulai instance bila belum berjalan (mis. setelah server restart), **termasuk untuk device offline/disconnected**: server mencoba menghubungkan ulang otomatis maksimal `DEVICE_QR_START_ATTEMPTS` kali (default **3**, jeda 2 detik antar percobaan), lalu berhenti dan masuk cooldown 60 detik sebelum sesi baru bisa dimulai. Buka lagi endpoint ini / tombol Tautkan setelah cooldown untuk mencoba dari awal.
 
 **Response `200`**
 
@@ -739,12 +740,14 @@ Memulai instance bila belum berjalan (mis. setelah server restart).
   "data": {
     "status": "pending_qr",
     "qr": "data:image/png;base64,iVBORw0KGgo...",
-    "pairing_code": null
+    "pairing_code": null,
+    "attempts": { "attempts_used": 0, "attempts_max": 3 },
+    "cooldown_ms": null
   }
 }
 ```
 
-`qr` sudah berupa data URL siap ditampilkan di `<img>`. Bila memakai pairing code, `pairing_code` berisi kode 8 digit.
+`qr` sudah berupa data URL siap ditampilkan di `<img>`. Bila memakai pairing code, `pairing_code` berisi kode 8 digit. `attempts` menampilkan progres sesi retry terbatas (`null` bila tidak sedang mencoba / sudah berhenti); `cooldown_ms` berisi sisa waktu cooldown setelah sesi gagal (`null` bila tidak dalam cooldown).
 
 ### 5.4 Status Device
 
@@ -1045,30 +1048,86 @@ DELETE /api/rules/:id
 
 ---
 
-## 8. Penyajian Media
+## 7b. Manajemen Pengguna (Admin)
 
-File media **tidak** disajikan sebagai folder publik. Setiap URL memiliki tanda tangan HMAC.
+Kelola akun dashboard dan penugasan device (ACL). Semua endpoint **Admin**.
+
+### 7b.1 Daftar Pengguna
 
 ```http
-GET /media/:deviceId/:filename?t=<signature>
+GET /api/users
 ```
 
-- **Auth**: tidak perlu JWT, tetapi `t` wajib valid.
-- Signature = HMAC-SHA256 dari `"<deviceId>/<filename>"` memakai `MEDIA_TOKEN_SECRET` (fallback `JWT_SECRET`).
-- Signature **tidak kedaluwarsa**, tetapi berubah bila secret diganti.
-- `Cache-Control: private, max-age=86400, immutable`.
-- `403` jika signature salah, `404` jika file tidak ada.
+**Response `200`**
+
+```json
+{ "error": false, "data": [
+  { "id": "uuid", "name": "Agen", "email": "agen@x.id", "role": "agent",
+    "device_ids": ["uuid-device-1"], "created_at": "..." } ] }
+```
+
+### 7b.2 Buat Pengguna
+
+```http
+POST /api/users
+{ "name": "Agen Dua", "email": "agen2@x.id", "password": "minimal-8-karakter", "role": "agent", "device_ids": ["uuid-device-1"] }
+```
+
+**Response `201`**: objek user. `409` bila email sudah dipakai.
+
+### 7b.3 Ubah Pengguna
+
+```http
+PUT /api/users/:id
+{ "name"?: "...", "role"?: "admin|agent", "password"?: "...", "device_ids"?: ["..."] }
+```
+
+- `password` kosong/undefined = tidak diubah.
+- Admin terakhir tidak boleh diturunkan rolenya (jaga agar dashboard tidak terkunci).
+
+### 7b.4 Hapus Pengguna
+
+```http
+DELETE /api/users/:id
+```
+
+- Tidak bisa menghapus akun sendiri, dan admin terakhir tidak bisa dihapus.
+
+### 7b.5 Aturan Akses (ACL)
+
+- **Admin tanpa penugasan** = akses penuh ke semua device (super admin, perilaku lama).
+- **Admin dengan penugasan** (`device_ids` diisi) hanya melihat/mengelola device itu; akses ke device lain dibalas `404`.
+- **Agent** hanya melihat device yang ditugaskan; tanpa penugasan = tidak melihat device apa pun.
+- Device yang dibuat oleh admin yang dibatasi otomatis masuk daftar device miliknya.
+- Penugasan juga berlaku untuk socket.io: user hanya menerima event realtime device miliknya.
+
+---
+
+## 8. Penyajian Media
+
+File media **tidak** disajikan sebagai folder publik. Setiap URL memiliki tanda tangan HMAC **dengan masa berlaku**.
+
+```http
+GET /media/:deviceId/:filename?e=<expiry-ms>&t=<signature>
+```
+
+- **Auth**: tidak perlu JWT, tetapi `t` dan `e` wajib valid.
+- Signature = HMAC-SHA256 dari `"<deviceId>/<filename>/<expiry>"` memakai `MEDIA_TOKEN_SECRET` (fallback `JWT_SECRET`).
+- Masa berlaku diatur `MEDIA_URL_EXPIRY_HOURS` (default **168 jam / 7 hari**). URL yang lewat masa berlaku ditolak `403`.
+- URL di response **selalu segar**: diperbarui otomatis setiap kali daftar pesan dibuka (`GET /api/chats/:id/messages`) dan oleh dashboard. Aplikasi klien sebaiknya memakai URL dari response terbaru, bukan menyimpannya permanen.
+- `Cache-Control: private, max-age=3600`.
+- `403` jika signature salah/kedaluwarsa, `404` jika file tidak ada.
 
 Contoh URL yang dikembalikan pada `Message.media_url`:
 
 ```
-/media/a1b2c3d4-.../3EB0A1B2C3D4E5F6.jpg?t=ab12cd34ef56...
+/media/a1b2c3d4-.../3EB0A1B2C3D4E5F6.jpg?e=1769500000000&t=ab12cd34ef56...
 ```
 
 Gunakan langsung di `<img>`, `<video>`, `<audio>`, atau tautan unduh:
 
 ```html
-<img src="http://localhost:3000/media/a1b2c3d4-.../3EB0A1B2C3D4E5F6.jpg?t=ab12cd34ef56..." alt="Gambar" />
+<img src="http://localhost:3000/media/a1b2c3d4-.../3EB0A1B2C3D4E5F6.jpg?e=1769500000000&t=ab12cd34ef56..." alt="Gambar" />
 ```
 
 > Jangan membangun URL sendiri tanpa signature — akan ditolak `403`.

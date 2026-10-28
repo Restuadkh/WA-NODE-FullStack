@@ -55,6 +55,9 @@ module.exports = {
     reconnectBaseDelayMs: int(process.env.WA_RECONNECT_BASE_MS, 1000),
     reconnectMaxDelayMs: int(process.env.WA_RECONNECT_MAX_MS, 5 * 60 * 1000),
     reconnectMaxAttempts: int(process.env.WA_RECONNECT_MAX_ATTEMPTS, 0),
+    // Sesi start dari endpoint QR / tombol Tautkan: retry otomatis dibatasi N percobaan
+    // (0 = perilaku lama, tanpa batas). Setelah N gagal, berhenti sampai dicoba lagi.
+    qrStartMaxAttempts: int(process.env.DEVICE_QR_START_ATTEMPTS, 3),
   },
 
   gatewayApi: {
@@ -78,6 +81,8 @@ module.exports = {
     maxIncomingBytes: int(process.env.MEDIA_MAX_MB, 25) * 1024 * 1024,
     // Rahasia tanda tangan URL media. Default memakai JWT_SECRET.
     tokenSecret: process.env.MEDIA_TOKEN_SECRET || process.env.JWT_SECRET || "",
+    // Masa berlaku URL media (jam). URL diperbarui otomatis setiap kali inbox dibuka.
+    urlExpiryMs: int(process.env.MEDIA_URL_EXPIRY_HOURS, 168) * 60 * 60 * 1000,
   },
 
   autoReply: {

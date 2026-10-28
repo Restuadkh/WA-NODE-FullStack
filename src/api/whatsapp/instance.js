@@ -73,6 +73,11 @@ class WhatsAppInstance extends EventEmitter {
     this.watchdog = null; // interval "healing" escrow: menghidupkan ulang reconnect yang mati
     this.replaced = false; // sesi digantikan koneksi lain (connectionReplaced) -> tidak di-heal otomatis
     this.pairingRequested = false;
+    // Sesi start TERBATAS (mis. dari tombol Tautkan / endpoint QR): retry otomatis
+    // dibatasi N percobaan, setelah itu berhenti total sampai pengguna mencoba lagi.
+    this.bounded = null; // { max, count } | null
+    this.boundedCooldownUntil = 0; // jeda setelah sesi terbatas gagal (anti retry tanpa akhir)
+    this.BOUNDED_COOLDOWN_MS = 60_000;
     this.groupNames = new Map();
   }
 
@@ -82,9 +87,27 @@ class WhatsAppInstance extends EventEmitter {
 
   // ---------------------------------------------------------------- lifecycle
 
-  start() {
+  /**
+   * Mulai instance.
+   * Tanpa opsi: perilaku normal (reconnect otomatis mengikuti WA_RECONNECT_*).
+   * { maxAttempts: N }: sesi start TERBATAS — bila koneksi terus gagal, diulang
+   * otomatis maksimal N kali (jeda singkat), lalu berhenti total (tanpa watchdog).
+   * Dipanggil berulang selama sesi masih berjalan TIDAK mengulang penghitung.
+   */
+  start(opts = {}) {
     this.stopped = false;
     if (!config.whatsapp.enabled) return Promise.resolve(this);
+
+    if (opts.maxAttempts > 0) {
+      // Sesi sebelumnya baru saja gagal sampai batas percobaan: beri jeda (cooldown)
+      // agar polling QR tidak memulai sesi retry baru terus-menerus.
+      if (Date.now() < this.boundedCooldownUntil) return Promise.resolve(this);
+      // Sesi baru hanya bila sesi terbatas sebelumnya sudah selesai.
+      if (!this.bounded || this.bounded.count >= this.bounded.max) {
+        this.bounded = { max: opts.maxAttempts, count: 0 };
+      }
+      this.replaced = false;
+    }
 
     // Jangan membuat socket ganda untuk satu instance. Pemanggilan berulang (polling QR,
     // reconnect, restore) memakai proses yang sedang berjalan / socket yang sudah ada.
@@ -113,6 +136,7 @@ class WhatsAppInstance extends EventEmitter {
     this.stopped = true;
     this.generation++;
     this.starting = null;
+    this.bounded = null;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     clearInterval(this.watchdog);
@@ -125,6 +149,7 @@ class WhatsAppInstance extends EventEmitter {
     this.stopped = true;
     this.generation++;
     this.starting = null;
+    this.bounded = null;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     clearInterval(this.watchdog);
@@ -199,6 +224,7 @@ class WhatsAppInstance extends EventEmitter {
       this.reconnectAttempts = 0;
       this.qr = null;
       this.pairingCode = null;
+      this.bounded = null; // koneksi sukses: sesi start terbatas selesai
       this.phone = phoneFromJid(sock.user?.id);
       this._setStatus("connected");
     } else if (connection === "close") {
@@ -254,6 +280,35 @@ class WhatsAppInstance extends EventEmitter {
       // Pemulihan tetap mungkin lewat tombol "Tautkan" (start manual) di dashboard.
       this.replaced = true;
       logger.warn({ key: this.key }, "Sesi digantikan koneksi WhatsApp lain; reconnect otomatis dihentikan");
+      return;
+    }
+
+    // QR kedaluwarsa / pairing batal: pada sesi start terbatas, ulangi otomatis
+    // (membuat QR baru) sampai batas percobaan, lalu berhenti sampai pengguna mencoba lagi.
+    if (this.bounded) {
+      this.bounded.count += 1;
+      if (this.bounded.count >= this.bounded.max) {
+        logger.warn(
+          { key: this.key, attempts: this.bounded.count },
+          `Batas ${this.bounded.max} percobaan koneksi tercapai, berhenti (tombol Tautkan untuk mencoba lagi)`,
+        );
+        // Batalkan timer percobaan yang mungkin masih terjadwal.
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        this.bounded = null;
+        this.boundedCooldownUntil = Date.now() + this.BOUNDED_COOLDOWN_MS;
+        return;
+      }
+      // Timer langsung (tanpa watchdog healing) agar batas benar-benar dihormati.
+      const generation = this.generation;
+      const delay = 2000;
+      clearTimeout(this.reconnectTimer);
+      logger.info({ key: this.key, attempt: this.bounded.count, delayMs: delay }, "Menjadwalkan koneksi ulang (terbatas)");
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        if (this.stopped || generation !== this.generation || this.sock) return;
+        this.start();
+      }, delay);
       return;
     }
 
@@ -450,6 +505,10 @@ class WhatsAppInstance extends EventEmitter {
       phone: this.phone,
       has_qr: !!this.qr,
       has_pairing_code: !!this.pairingCode,
+      // Sesi start terbatas aktif: { attempts_used, attempts_max } — null bila tidak ada.
+      bounded: this.bounded ? { attempts_used: this.bounded.count, attempts_max: this.bounded.max } : null,
+      // Bila sesi terbatas baru gagal: berapa lama lagi endpoint QR boleh mulai sesi baru.
+      cooldown_ms: Math.max(0, this.boundedCooldownUntil - Date.now()) || null,
     };
   }
 }

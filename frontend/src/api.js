@@ -77,7 +77,9 @@ export const api = {
   updateDevice: (id, patch) =>
     request(`/api/devices/${id}`, { method: "PUT", body: patch }).then(data),
   deleteDevice: (id) => request(`/api/devices/${id}`, { method: "DELETE" }),
-  // -> { status, qr (data URL PNG | null), pairing_code | null }. Memulai instance bila belum jalan.
+  // -> { status, qr (data URL PNG | null), pairing_code | null,
+  //      attempts: { attempts_used, attempts_max } | null, cooldown_ms | null }.
+  // Device offline/disconnected dicoba ulang otomatis maksimal 3x (DEVICE_QR_START_ATTEMPTS).
   deviceQr: (id) => request(`/api/devices/${id}/qr`).then(data),
 
   // --- chat
@@ -115,4 +117,10 @@ export const api = {
   jobStats: (deviceId) => request(`/api/devices/${deviceId}/jobs/stats`).then(data),
   cancelJob: (id) => request(`/api/jobs/${id}`, { method: "DELETE" }).then(data),
   retryJob: (id) => request(`/api/jobs/${id}/retry`, { method: "POST" }).then(data),
+
+  // --- manajemen user (admin)
+  listUsers: () => request("/api/users").then(data),
+  createUser: (payload) => request("/api/users", { method: "POST", body: payload }).then(data),
+  updateUser: (id, patch) => request(`/api/users/${id}`, { method: "PUT", body: patch }).then(data),
+  deleteUser: (id) => request(`/api/users/${id}`, { method: "DELETE" }),
 };

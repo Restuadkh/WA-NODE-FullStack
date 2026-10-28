@@ -2,6 +2,7 @@ const config = require("../../config/config");
 const { MessageJob } = require("../models");
 const queueService = require("../services/queueService");
 const { findDevice, httpError } = require("./devices.controller");
+const { assertDeviceAccess } = require("../services/deviceAccess");
 const safeFetch = require("../../utils/safeFetch");
 
 const MEDIA_TYPES = ["image", "video", "audio", "sticker", "document"];
@@ -155,7 +156,8 @@ async function enqueueMediaUrl(req, res) {
 
 // GET /api/devices/:deviceId/jobs?status=pending&limit=100&offset=0
 async function listJobs(req, res) {
-  await findDevice(req.params.deviceId);
+  const device = await findDevice(req.params.deviceId);
+  await assertDeviceAccess(req.user, device.id);
   const status = String(req.query.status || "").trim();
   if (status && !STATUSES.includes(status)) throw httpError("status tidak valid", 400);
 
@@ -178,7 +180,8 @@ async function listJobs(req, res) {
 
 // GET /api/devices/:deviceId/jobs/stats
 async function jobStats(req, res) {
-  await findDevice(req.params.deviceId);
+  const device = await findDevice(req.params.deviceId);
+  await assertDeviceAccess(req.user, device.id);
   res.json({ error: false, data: await queueService.stats(req.params.deviceId) });
 }
 
@@ -186,6 +189,7 @@ async function jobStats(req, res) {
 async function cancelJob(req, res) {
   const job = await MessageJob.findByPk(req.params.id);
   if (!job) throw httpError("Job tidak ditemukan", 404);
+  await assertDeviceAccess(req.user, job.device_id);
   await queueService.cancel(job);
   res.json({ error: false, data: serializeJob(job) });
 }
@@ -194,6 +198,7 @@ async function cancelJob(req, res) {
 async function retryJob(req, res) {
   const job = await MessageJob.findByPk(req.params.id);
   if (!job) throw httpError("Job tidak ditemukan", 404);
+  await assertDeviceAccess(req.user, job.device_id);
   await queueService.retry(job);
   res.json({ error: false, data: serializeJob(job) });
 }

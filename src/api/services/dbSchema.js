@@ -28,6 +28,11 @@ const DEVICE_WEBHOOK_COLUMNS = {
   webhook_secret: { type: DataTypes.STRING(255), allowNull: true },
 };
 
+// Antrean: klaim worker (v2.5). Dipakai untuk reset job "sending" yang aman.
+const JOB_CLAIM_COLUMNS = {
+  claimed_at: { type: DataTypes.DATE, allowNull: true },
+};
+
 function tableNameOf(model) {
   const name = model.getTableName();
   return typeof name === "string" ? name : name.tableName;
@@ -68,6 +73,11 @@ async function ensureMediaColumns(options = {}) {
 async function ensureDeviceWebhookColumns(options = {}) {
   const { Device } = require("../models");
   return ensureColumns(Device, DEVICE_WEBHOOK_COLUMNS, options);
+}
+
+async function ensureJobClaimColumns(options = {}) {
+  const { MessageJob } = require("../models");
+  return ensureColumns(MessageJob, JOB_CLAIM_COLUMNS, options);
 }
 
 async function ensureMessageTypeEnum({ log = () => {}, dryRun = false } = {}) {
@@ -127,7 +137,9 @@ module.exports = {
   ensureMessageTypeEnum,
   ensureDeviceWebhookSchema,
   ensureDeviceWebhookColumns,
+  ensureJobClaimColumns,
   MEDIA_COLUMNS,
   DEVICE_WEBHOOK_COLUMNS,
+  JOB_CLAIM_COLUMNS,
   TYPE_VALUES,
 };

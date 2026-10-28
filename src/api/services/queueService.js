@@ -1,5 +1,5 @@
 const fs = require("fs");
-const { Op, fn, col } = require("sequelize");
+const { Op, fn, col, literal } = require("sequelize");
 const config = require("../../config/config");
 const logger = require("./logger");
 const manager = require("../whatsapp/manager");
@@ -10,6 +10,10 @@ const { orderedUuid } = require("../models/orderedId");
 const { toJid } = require("../whatsapp/jid");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Job yang masih berstatus "sending" lebih lama dari ini dianggap klaim mati (worker
+// sudah tidak ada) dan dikembalikan ke antrean. Mencegah pesan terkirim dobel saat
+// proses restart di tengah pengiriman.
+const STALE_CLAIM_MS = 15 * 60 * 1000;
 
 let timer = null;
 let ticking = false;
@@ -238,6 +242,17 @@ async function simulateTyping(instance, jid, text) {
 }
 
 async function runJob(job, device, instance) {
+  // Anti kirim dobel: job yang terkirim tapi gagal update status (mis. crash) masih
+  // "sending" dengan message_id terisi. Bila pesannya sudah ada di riwayat, jangan kirim ulang.
+  if (job.message_id) {
+    const existing = await Message.count({ where: { id: job.message_id } });
+    if (existing) {
+      await job.update({ status: "sent", sent_at: job.sent_at || new Date(), next_attempt_at: null, claimed_at: null });
+      await cleanupMedia(job, device.id);
+      return;
+    }
+  }
+
   const payload = job.payload || {};
   let delivered = false;
   let deliveredMessage = null;
@@ -286,6 +301,7 @@ async function runJob(job, device, instance) {
       status: "sent",
       sent_at: new Date(),
       next_attempt_at: null,
+      claimed_at: null,
       message_id: message?.id || null,
       last_error: storageFailed ? "Pesan terkirim tetapi gagal disimpan ke riwayat" : null,
     });
@@ -302,6 +318,7 @@ async function runJob(job, device, instance) {
           status: "sent",
           sent_at: new Date(),
           next_attempt_at: null,
+          claimed_at: null,
           message_id: deliveredMessage?.id || null,
           last_error: String(err.message || err).slice(0, 1000),
         });
@@ -318,7 +335,7 @@ async function runJob(job, device, instance) {
     const message = String(err.message || err).slice(0, 1000);
 
     if (permanent || attempts >= job.max_attempts) {
-      await job.update({ status: "failed", last_error: message, next_attempt_at: null });
+      await job.update({ status: "failed", last_error: message, next_attempt_at: null, claimed_at: null });
       logger.warn({ job: job.id, device: device.id, attempts, err: message }, "Job pesan gagal permanen");
     } else {
       const backoff = Math.min(
@@ -330,6 +347,7 @@ async function runJob(job, device, instance) {
         status: "pending",
         last_error: message,
         next_attempt_at: new Date(Date.now() + delay),
+        claimed_at: null,
       });
       logger.warn({ job: job.id, device: device.id, attempts, delay, err: message }, "Job pesan gagal, dijadwalkan ulang");
     }
@@ -368,9 +386,10 @@ async function processDevice(device) {
   });
   if (!candidate) return;
 
-  // Klaim atomik: hanya satu worker/timer yang boleh mengambil job ini.
+  // Klaim atomik: hanya satu worker/timer yang boleh mengambil job ini. attempts
+  // di-increment di SQL (bukan dari snapshot) agar tidak saling menimpa dengan retry().
   const [claimed] = await MessageJob.update(
-    { status: "sending", attempts: candidate.attempts + 1 },
+    { status: "sending", attempts: literal("attempts + 1"), claimed_at: new Date() },
     { where: { id: candidate.id, status: "pending" } },
   );
   if (!claimed) return;
@@ -389,6 +408,13 @@ async function tick() {
   if (!config.queue.enabled || stopped || ticking) return;
   ticking = true;
   try {
+    // Bersihkan klaim mati: job "sending" yang klaimnya basi dikembalikan ke antrean
+    // (mis. worker terbunuh di tengah jalan tanpa restart penuh).
+    const staleBefore = new Date(Date.now() - STALE_CLAIM_MS);
+    await MessageJob.update(
+      { status: "pending", next_attempt_at: new Date(), claimed_at: null },
+      { where: { status: "sending", [Op.or]: [{ claimed_at: null }, { claimed_at: { [Op.lt]: staleBefore } }] } },
+    );
     const groups = await MessageJob.findAll({
       attributes: ["device_id"],
       where: dueWhere(),
@@ -413,10 +439,12 @@ async function start() {
   started = true;
   stopped = false;
 
-  // Job yang tertinggal di status "sending" karena server mati dikembalikan ke antrean.
+  // Job "sending" dikembalikan ke antrean bila klaimnya sudah basi (worker mati):
+  // null = versi lama / klaim oleh proses yang sudah mati sebelum sempat menyimpan waktu.
+  const staleBefore = new Date(Date.now() - STALE_CLAIM_MS);
   const [reset] = await MessageJob.update(
-    { status: "pending", next_attempt_at: new Date() },
-    { where: { status: "sending" } },
+    { status: "pending", next_attempt_at: new Date(), claimed_at: null },
+    { where: { status: "sending", [Op.or]: [{ claimed_at: null }, { claimed_at: { [Op.lt]: staleBefore } }] } },
   );
   if (reset) logger.warn({ jumlah: reset }, "Job antrean yang terputus dikembalikan ke pending");
 
@@ -505,6 +533,7 @@ async function retry(job) {
     status: "pending",
     attempts: 0,
     next_attempt_at: null,
+    claimed_at: null,
     last_error: null,
     scheduled_at: new Date(),
   });
