@@ -18,3 +18,4 @@ src/auth/*
 .well-known/
 src/.htaccess
 yarn.lock
+package-lock.json
