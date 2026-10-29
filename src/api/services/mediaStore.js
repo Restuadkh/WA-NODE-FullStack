@@ -95,7 +95,11 @@ function refreshUrl(stored) {
   try {
     if (!stored) return null;
     const path = String(stored).split("?")[0];
-    const [, deviceId, filename] = path.split("/").map((s) => decodeURIComponent(s));
+    // URL format: /media/deviceId/filename -> split: ['', 'media', 'deviceId', 'filename']
+    const parts = path.split("/").map((s) => decodeURIComponent(s));
+    if (parts.length < 4 || parts[1] !== "media") return null;
+    const deviceId = parts[2];
+    const filename = parts[3];
     if (!deviceId || !filename) return null;
     return publicUrl(deviceId, filename);
   } catch {

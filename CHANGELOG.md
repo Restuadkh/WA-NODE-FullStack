@@ -24,6 +24,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
 
 ### 🛠 Perbaikan bug
 
+- `refreshUrl` pada `mediaStore` memperbaiki parsing URL media — sebelumnya salah mengekstrak `deviceId` dan `filename` menyebabkan URL jadi `/media/media/...` di production (PM2).
 - `removeDevice` kini dalam **transaksi database** — kegagalan di tengah tidak lagi menyisakan data setengah terhapus; link ACL ikut dibersihkan.
 - **Antrean anti kirim-dobel** — kolom baru `claimed_at` (terpasang otomatis saat start / `npm run db:upgrade`): job `sending` hanya direset bila klaimnya basi (>15 menit), guard `message_id` mencegah pengiriman ulang, dan increment `attempts` dilakukan di SQL agar tidak saling menimpa dengan tombol Ulangi.
 - `markRead` di inbox kini **sinkron ke WhatsApp** (`readMessages`) — centang di ponsel ikut berubah, bukan hanya di dashboard.
