@@ -193,6 +193,13 @@ h2 { font-size: 17px; }
 
 .check-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .check-item { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.radio-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.radio-item:hover { border-color: var(--accent); }
+.radio-item:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.radio-item input[type="radio"] { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+.radio-item input[type="radio"]:disabled { cursor: not-allowed; opacity: 0.5; }
+.radio-item span { flex: 1; line-height: 1.4; }
+.radio-item .muted.small { display: block; margin-top: 2px; font-size: 11px; }
 
 /* Halaman dokumentasi API */
 .docs-card { padding: 18px 20px; margin-bottom: 14px; }

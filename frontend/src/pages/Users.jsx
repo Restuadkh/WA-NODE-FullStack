@@ -3,7 +3,8 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 
 // Halaman Users (khusus admin): kelola akun dashboard & penugasan device (ACL).
-const emptyForm = { name: "", email: "", password: "", role: "agent", device_ids: [] };
+// deviceMode: "all" = semua device (hanya admin), "none" = tidak ada device, "select" = pilih tertentu
+const emptyForm = { name: "", email: "", password: "", role: "agent", device_ids: [], deviceMode: "none" };
 
 export default function Users() {
   const { user: me } = useAuth();
@@ -39,7 +40,16 @@ export default function Users() {
     setEditing("new");
   };
   const openEdit = (user) => {
-    setForm({ name: user.name, email: user.email, password: "", role: user.role, device_ids: user.device_ids });
+    // Tentukan deviceMode berdasarkan device_ids dan role
+    let deviceMode = "select";
+    if (user.role === "admin" && (!user.device_ids || user.device_ids.length === 0)) {
+      deviceMode = "all"; // admin tanpa device = akses penuh
+    } else if ((!user.device_ids || user.device_ids.length === 0) && user.role === "agent") {
+      deviceMode = "none"; // agent tanpa device = tidak ada akses
+    } else {
+      deviceMode = "select";
+    }
+    setForm({ name: user.name, email: user.email, password: "", role: user.role, device_ids: user.device_ids || [], deviceMode });
     setEditing(user);
   };
 
@@ -98,8 +108,9 @@ export default function Users() {
         <div>
           <h1>Pengguna</h1>
           <p className="muted">
-            Kelola akun dashboard. <b>Agent</b> hanya bisa melihat chat dan antrian device yang ditugaskan kepadanya;
-            <b> admin</b> mengakses semuanya.
+            Kelola akun dashboard. <b>Agent</b> hanya bisa melihat chat dan antrian device yang ditugaskan kepadanya.
+            <b>Admin</b> bisa memilih: <b>Semua device</b> (akses penuh), <b>Tidak ada device</b>, atau <b>Pilih device tertentu</b>.
+            Device bisa dibagikan ke beberapa user (admin/agent).
           </p>
         </div>
         <button className="btn" onClick={openNew}>
@@ -136,13 +147,11 @@ export default function Users() {
                     <span className={`badge badge-${u.role === "admin" ? "sent" : "pending"}`}>{u.role}</span>
                   </td>
                   <td className="muted small">
-                    {u.role === "admin"
-                      ? u.device_ids.length
+                    {u.role === "admin" && (!u.device_ids || u.device_ids.length === 0)
+                      ? <span className="badge badge-sent">Semua device</span>
+                      : u.device_ids && u.device_ids.length > 0
                         ? u.device_ids.map(deviceName).join(", ")
-                        : "Semua"
-                      : u.device_ids.length
-                        ? u.device_ids.map(deviceName).join(", ")
-                        : "—"}
+                        : <span className="badge badge-pending">Tidak ada device</span>}
                   </td>
                   <td className="right actions">
                     <button className="btn btn-sm" onClick={() => openEdit(u)}>
@@ -213,24 +222,81 @@ export default function Users() {
             )}
             <label className="field">
               <span>Role</span>
-              <select className="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              <select className="select" value={form.role} onChange={(e) => {
+                const newRole = e.target.value;
+                setForm(prev => {
+                  // Reset deviceMode saat ganti role
+                  let newDeviceMode = prev.deviceMode;
+                  if (newRole === "admin" && prev.deviceMode === "none") {
+                    newDeviceMode = "all"; // admin default ke "all"
+                  } else if (newRole === "agent" && prev.deviceMode === "all") {
+                    newDeviceMode = "none"; // agent tidak bisa "all", default ke "none"
+                  }
+                  return { ...prev, role: newRole, deviceMode: newDeviceMode, device_ids: newDeviceMode === "select" ? prev.device_ids : [] };
+                });
+              }}>
                 <option value="agent">agent</option>
                 <option value="admin">admin</option>
               </select>
             </label>
 
             <div className="field">
-              <span>Device yang boleh dikelola (admin tanpa penugasan = akses penuh)</span>
-              <div className="check-list">
-                {devices.length === 0 && <span className="muted small">Belum ada device</span>}
-                {devices.map((d) => (
-                  <label key={d.id} className="check-item">
-                    <input type="checkbox" checked={form.device_ids.includes(d.id)} onChange={() => toggleDevice(d.id)} />
-                    <span>{d.name}</span>
-                  </label>
-                ))}
+              <span>Akses Device</span>
+              <div className="check-list" style={{ flexDirection: 'column', gap: '8px' }}>
+                <label className="check-item radio-item">
+                  <input
+                    type="radio"
+                    name="deviceMode"
+                    checked={form.deviceMode === "all"}
+                    onChange={() => {
+                      if (form.role === "admin") {
+                        setForm({ ...form, deviceMode: "all", device_ids: [] });
+                      }
+                    }}
+                    disabled={form.role !== "admin"}
+                  />
+                  <span>
+                    <strong>Semua device</strong> (akses penuh ke semua device, termasuk device baru di masa depan)
+                    {form.role !== "admin" && <span className="muted small"> — hanya untuk admin</span>}
+                  </span>
+                </label>
+                <label className="check-item radio-item">
+                  <input
+                    type="radio"
+                    name="deviceMode"
+                    checked={form.deviceMode === "none"}
+                    onChange={() => setForm({ ...form, deviceMode: "none", device_ids: [] })}
+                  />
+                  <span>
+                    <strong>Tidak ada device</strong> (tidak bisa melihat/mengelola device manapun)
+                  </span>
+                </label>
+                <label className="check-item radio-item">
+                  <input
+                    type="radio"
+                    name="deviceMode"
+                    checked={form.deviceMode === "select"}
+                    onChange={() => setForm({ ...form, deviceMode: "select" })}
+                  />
+                  <span><strong>Pilih device tertentu</strong> (hanya device yang dicentang di bawah)</span>
+                </label>
               </div>
             </div>
+
+            {form.deviceMode === "select" && (
+              <div className="field">
+                <span>Device yang dipilih ({form.device_ids.length})</span>
+                <div className="check-list">
+                  {devices.length === 0 && <span className="muted small">Belum ada device</span>}
+                  {devices.map((d) => (
+                    <label key={d.id} className="check-item">
+                      <input type="checkbox" checked={form.device_ids.includes(d.id)} onChange={() => toggleDevice(d.id)} />
+                      <span>{d.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="right actions">
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setEditing(null)}>

@@ -21,6 +21,8 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
 - **Manajemen Pengguna di dashboard** (menu **Pengguna**, admin): tambah/edit/hapus akun, ganti nama/role/password, dan **penugasan device** per user. Admin terakhir dilindungi (tidak bisa dihapus/diturunkan), tidak bisa menghapus akun sendiri.
 - **Auto-reconnect terbatas dari endpoint QR** — membuka QR / tombol Tautkan pada device offline/terputus memicu retry otomatis maksimal `DEVICE_QR_START_ATTEMPTS` (default **3**) dengan jeda 2 detik, lalu **berhenti total + cooldown 60 detik** (bukan retry tanpa akhir). Response `GET /api/devices/:id/qr` kini memuat `attempts` (progres percobaan) dan `cooldown_ms`. Modal QR menampilkan "percobaan 2/3" dan sisa waktu cooldown.
 - **Halaman Dok API** (`/api-docs`) di dashboard: dokumentasi penggunaan `/api/message/*` beserta contoh request/response, tabel kode status, ringkasan kuota anti-ban, dan format webhook (detail lengkap tetap di `RES-API.md`).
+- **Input pesan auto-resize di Inbox** — textarea membesar ke atas hingga maksimal ~5 baris, lalu muncul scrollbar vertikal untuk teks panjang (>100 karakter). Mendukung Shift+Enter untuk baris baru, Enter untuk kirim.
+- **Pengelolaan akses device per user (Admin & Agent)** — tiga mode pilihan jelas: **Semua device** (hanya admin, akses penuh termasuk device baru), **Tidak ada device** (tidak bisa melihat device manapun), **Pilih device tertentu** (centang device individual). Device bisa dibagikan ke beberapa user sekaligus. Saat ganti role, mode akses otomatis disesuaikan (admin→"all", agent→"none").
 
 ### 🛠 Perbaikan bug
 

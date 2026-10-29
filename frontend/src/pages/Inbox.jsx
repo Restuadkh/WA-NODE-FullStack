@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { getSocket } from "../socket";
@@ -123,8 +123,23 @@ export default function Inbox() {
   const recorderChunks = useRef([]);
   const recorderCancelled = useRef(false);
   const attachmentRef = useRef(null);
+  const textareaRef = useRef(null);
   attachmentRef.current = attachment;
   activeIdRef.current = activeId;
+
+  // Auto-resize textarea: grows upward, max ~5 rows, scrolls beyond that
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    // Reset height to measure scrollHeight accurately
+    ta.style.height = "auto";
+    const lineHeight = parseInt(getComputedStyle(ta).lineHeight, 10) || 24;
+    const maxRows = 5;
+    const maxHeight = lineHeight * maxRows + 8; // +8 for padding
+    const newHeight = Math.min(ta.scrollHeight, maxHeight);
+    ta.style.height = `${newHeight}px`;
+    ta.style.overflowY = ta.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [text, attachment]);
 
   const activeChat = useMemo(() => chats.find((c) => c.id === activeId) || null, [chats, activeId]);
 
@@ -541,6 +556,7 @@ export default function Inbox() {
                     {recording ? "⏹" : "🎙"}
                   </button>
                   <textarea
+                    ref={textareaRef}
                     value={text}
                     onChange={(e) => setText(e.target.value)}
                     onKeyDown={onKeyDown}
@@ -548,6 +564,21 @@ export default function Inbox() {
                     title="Enter = kirim, Shift+Enter = baris baru"
                     rows={1}
                     disabled={sending}
+                    style={{
+                      resize: "none",
+                      minHeight: "40px",
+                      maxHeight: "140px",
+                      lineHeight: "1.4",
+                      padding: "8px 12px",
+                      fontSize: "14px",
+                      fontFamily: "inherit",
+                      border: "1px solid var(--border, #ddd)",
+                      borderRadius: "8px",
+                      outline: "none",
+                      boxShadow: "none",
+                      transition: "height 0.1s ease",
+                      overflowY: "hidden",
+                    }}
                   />
                   <button className="btn btn-primary" disabled={sending || recording || (!text.trim() && !attachment)}>
                     {sending ? "Mengirim…" : recording ? "Rekam…" : "Kirim"}
