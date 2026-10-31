@@ -26,7 +26,7 @@ export const setUnauthorizedHandler = (fn) => {
   onUnauthorized = fn;
 };
 
-async function request(path, { method = "GET", body, form } = {}) {
+async function request(path, { method = "GET", body, form, timeoutMs } = {}) {
   const headers = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -40,22 +40,40 @@ async function request(path, { method = "GET", body, form } = {}) {
     payload = JSON.stringify(body);
   }
 
+  // Timeout: media besar butuh waktu lebih lama (upload + kirim ke WhatsApp).
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || (form ? 5 * 60_000 : 30_000));
+
   let res;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
       body: payload,
+      signal: controller.signal,
     });
   } catch {
     throw new Error("Tidak bisa terhubung ke server. Pastikan backend berjalan.");
+  } finally {
+    clearTimeout(timer);
   }
 
-  const json = await res.json().catch(() => ({}));
+  // Baca sebagai teks dulu; respons non-JSON (proxy/redirect/HTML error) tetap bisa ditampilkan.
+  const raw = await res.text();
+  let json = {};
+  try {
+    json = raw ? JSON.parse(raw) : {};
+  } catch {
+    /* bukan JSON — biarkan json kosong, potongan teks dipakai di pesan error */
+  }
+
   // 401 pada request ber-token = token kedaluwarsa. 401 saat login (tanpa token) = password salah.
   if (res.status === 401 && token) onUnauthorized();
   if (!res.ok || json.error) {
-    throw new Error(json.message || `Permintaan gagal (${res.status})`);
+    const detail = json.message
+      || (raw ? raw.slice(0, 160) : "")
+      || `Permintaan gagal (HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""})`;
+    throw new Error(detail);
   }
   return json;
 }
@@ -86,15 +104,20 @@ export const api = {
   listChats: (deviceId) => request(`/api/devices/${deviceId}/chats`).then(data),
   listMessages: (chatId, limit = 200) =>
     request(`/api/chats/${chatId}/messages?limit=${limit}`).then(data),
-  sendMessage: (chatId, text) =>
-    request(`/api/chats/${chatId}/messages`, { method: "POST", body: { text } }).then(data),
-  // Kirim media: file (File/Blob), caption, type (image|video|audio|sticker|document), ptt (voice note)
-  sendMedia: (chatId, file, { caption = "", type, ptt = false, filename } = {}) => {
+  sendMessage: (chatId, text, { replyTo } = {}) =>
+    request(`/api/chats/${chatId}/messages`, {
+      method: "POST",
+      body: replyTo ? { text, replyTo } : { text },
+    }).then(data),
+  // Kirim media: file (File/Blob), caption, type (image|video|audio|sticker|document), ptt (voice note),
+  // replyTo = wa_message_id pesan yang dibalas (opsional).
+  sendMedia: (chatId, file, { caption = "", type, ptt = false, filename, replyTo } = {}) => {
     const form = new FormData();
     form.append("file", file, filename || file.name || "file");
     if (caption) form.append("caption", caption);
     if (type) form.append("type", type);
     if (ptt) form.append("ptt", "true");
+    if (replyTo) form.append("replyTo", replyTo);
     return request(`/api/chats/${chatId}/messages`, { method: "POST", form }).then(data);
   },
   markRead: (chatId) => request(`/api/chats/${chatId}/read`, { method: "POST" }).then(data),

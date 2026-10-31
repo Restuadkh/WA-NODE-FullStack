@@ -59,7 +59,25 @@ async function listMessages(req, res) {
   res.json({ error: false, data: mediaStore.refreshUrls(rows.reverse()) });
 }
 
+// Selesaikan target reply: cari pesan di chat ini berdasarkan wa_message_id.
+// Mengembalikan { key } (untuk Baileys `quoted`) dan { info } (untuk disimpan di riwayat).
+async function resolveReplyTarget(chat, raw) {
+  const waId = typeof raw === "string" ? raw.trim() : "";
+  if (!waId) return null;
+  const row = await Message.findOne({
+    where: { chat_id: chat.id, wa_message_id: waId },
+    attributes: ["wa_message_id", "body", "media_caption", "direction", "type"],
+  });
+  if (!row) throw httpError("Pesan yang dibalas tidak ditemukan di chat ini", 400);
+  const fromMe = row.direction === "outgoing";
+  return {
+    key: { remoteJid: chat.wa_jid, id: row.wa_message_id, fromMe },
+    info: { waId: row.wa_message_id, body: row.media_caption || row.body || "", fromMe },
+  };
+}
+
 // Kirim teks (JSON) atau media (multipart field "file" + type/caption/ptt).
+// Sebagai reply: kirim field `replyTo` = wa_message_id pesan yang dibalas.
 async function sendMessage(req, res) {
   const chat = await findChatWithAccess(req.params.chatId, req.user);
 
@@ -69,6 +87,8 @@ async function sendMessage(req, res) {
   const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
   const caption = typeof req.body?.caption === "string" ? req.body.caption.trim() : text;
   const requestedType = String(req.body?.type || "").toLowerCase();
+  const reply = await resolveReplyTarget(chat, req.body?.replyTo);
+  const quoted = reply?.key;
 
   if (req.file) {
     if (caption.length > MAX_TEXT) throw httpError(`Caption maksimal ${MAX_TEXT} karakter`, 400);
@@ -86,10 +106,11 @@ async function sendMessage(req, res) {
       device: chat.Device,
       instance,
       to: chat.wa_jid,
-      send: (inst, jid) => inst.sendMedia(jid, file, type, caption, { ptt }),
+      send: (inst, jid) => inst.sendMedia(jid, file, type, caption, { ptt, quoted }),
       preview: { type, body: caption ? `${label} ${caption}` : label },
       attachment: { ...file, type, caption, ptt },
       userId: req.user.id,
+      replyTo: reply?.info,
     });
 
     if (storageFailed) {
@@ -109,9 +130,10 @@ async function sendMessage(req, res) {
     device: chat.Device,
     instance,
     to: chat.wa_jid,
-    send: (inst, jid) => inst.sendText(jid, text),
+    send: (inst, jid) => inst.sendText(jid, text, { quoted }),
     preview: { type: "text", body: text },
     userId: req.user.id,
+    replyTo: reply?.info,
   });
 
   if (storageFailed) {

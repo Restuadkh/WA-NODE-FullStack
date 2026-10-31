@@ -16,9 +16,12 @@ const users = require("../controllers/users.controller");
 
 const router = express.Router();
 const admin = requireRole("admin");
+
+// Batas ukuran upload media (MB). Naikkan via env MEDIA_MAX_MB bila perlu kirim video besar.
+const MEDIA_MAX_MB = Math.max(1, Number(process.env.MEDIA_MAX_MB) || 50);
 const uploadOptions = {
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 20 },
+  limits: { fileSize: MEDIA_MAX_MB * 1024 * 1024, files: 1, fields: 20 },
 };
 const upload = multer(uploadOptions).single("file");
 const chatUpload = multer(uploadOptions).single("file");

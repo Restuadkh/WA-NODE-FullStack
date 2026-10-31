@@ -33,6 +33,13 @@ const JOB_CLAIM_COLUMNS = {
   claimed_at: { type: DataTypes.DATE, allowNull: true },
 };
 
+// Reply/quote pesan (v2.6). Kolom pesan yang dibalas.
+const REPLY_COLUMNS = {
+  reply_to_wa_id: { type: DataTypes.STRING, allowNull: true },
+  reply_to_body: { type: DataTypes.TEXT, allowNull: true },
+  reply_to_from_me: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+};
+
 function tableNameOf(model) {
   const name = model.getTableName();
   return typeof name === "string" ? name : name.tableName;
@@ -80,6 +87,11 @@ async function ensureJobClaimColumns(options = {}) {
   return ensureColumns(MessageJob, JOB_CLAIM_COLUMNS, options);
 }
 
+async function ensureReplyColumns(options = {}) {
+  const { Message } = require("../models");
+  return ensureColumns(Message, REPLY_COLUMNS, options);
+}
+
 async function ensureMessageTypeEnum({ log = () => {}, dryRun = false } = {}) {
   if (sequelize.getDialect() !== "mysql") return { changed: false };
 
@@ -111,6 +123,7 @@ async function ensureMediaSchema({ log = () => {}, warn = log, dryRun = false, t
   const result = { columns: { added: [], existing: [] }, enumChanged: false };
   try {
     result.columns = await ensureMediaColumns({ log, dryRun });
+    await ensureReplyColumns({ log, dryRun });
     const enumResult = await ensureMessageTypeEnum({ log, dryRun });
     result.enumChanged = !!enumResult.changed;
   } catch (err) {
@@ -138,8 +151,10 @@ module.exports = {
   ensureDeviceWebhookSchema,
   ensureDeviceWebhookColumns,
   ensureJobClaimColumns,
+  ensureReplyColumns,
   MEDIA_COLUMNS,
   DEVICE_WEBHOOK_COLUMNS,
   JOB_CLAIM_COLUMNS,
+  REPLY_COLUMNS,
   TYPE_VALUES,
 };

@@ -34,6 +34,11 @@ const Message = sequelize.define(
       type: DataTypes.ENUM("pending", "sent", "delivered", "read", "failed"),
       defaultValue: "pending",
     },
+
+    // Reply (membalas pesan tertentu): id & potongan teks pesan yang dibalas
+    reply_to_wa_id: { type: DataTypes.STRING, allowNull: true },
+    reply_to_body: { type: DataTypes.TEXT, allowNull: true },
+    reply_to_from_me: { type: DataTypes.BOOLEAN, defaultValue: false },
     sent_by_user_id: { type: DataTypes.UUID, allowNull: true }, // null = auto-reply / kontak / API
     is_auto_reply: { type: DataTypes.BOOLEAN, defaultValue: false },
   },

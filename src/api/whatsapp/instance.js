@@ -18,6 +18,11 @@ const baileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" })
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 
+// Opsi kirim Baileys (arg ke-3 sendMessage). Hanya relevan bila membalas pesan (quote).
+function buildSendOpts(opts = {}) {
+  return opts.quoted ? { quoted: opts.quoted } : {};
+}
+
 // Versi WhatsApp diambil sekali lalu dipakai bersama SEMUA instance. Sebelumnya setiap sesi
 // memanggil fetchLatestBaileysVersion() sendiri; saat banyak sesi dipulihkan/terhubung ulang,
 // permintaan yang menumpuk membuat proses lambat dan reconnect sesi lain ikut tertunda.
@@ -443,8 +448,12 @@ class WhatsAppInstance extends EventEmitter {
     return !!result?.exists;
   }
 
-  sendText(jid, text) {
-    return this._ensureOnline().sendMessage(jid, { text });
+  /**
+   * Kirim teks. `opts.quoted`: key pesan yang dibalas (reply/quote) —
+   * bentuknya { remoteJid, id, fromMe, participant? } (key dari Baileys).
+   */
+  sendText(jid, text, opts = {}) {
+    return this._ensureOnline().sendMessage(jid, { text }, buildSendOpts(opts));
   }
 
   // Status "composing"/"paused" untuk simulasi manusia (opsional, dipakai antrean).
@@ -483,7 +492,7 @@ class WhatsAppInstance extends EventEmitter {
       if (width) content.width = Number(width);
       if (height) content.height = Number(height);
     }
-    return this._ensureOnline().sendMessage(jid, content);
+    return this._ensureOnline().sendMessage(jid, content, buildSendOpts(opts));
   }
 
   // Nama grup (di-cache) untuk ditampilkan di inbox

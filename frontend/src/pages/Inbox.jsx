@@ -58,6 +58,10 @@ const bodyText = (m) => {
   return /^\[(Gambar|Video|Stiker|Audio|Pesan suara|Dokumen)\]/.test(m.body) ? "" : m.body;
 };
 
+// Potongan teks singkat untukPreview kotak reply
+const quotePreview = (m) =>
+  m?.media_caption || bodyText(m) || (m?.type !== "text" ? `[${MEDIA_LABEL[m.type] || m.type}]` : "") || "—";
+
 // Tampilan media di dalam bubble. URL media sudah bertanda tangan dari server.
 function MediaContent({ m }) {
   if (!m.media_url) {
@@ -113,6 +117,7 @@ export default function Inbox() {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [devicesLoaded, setDevicesLoaded] = useState(false);
   const [attachment, setAttachment] = useState(null); // { file, type, ptt, name, previewUrl }
+  const [replyTo, setReplyTo] = useState(null); // pesan yang dibalas (mode reply/quote)
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
 
@@ -193,6 +198,7 @@ export default function Inbox() {
     setActiveId(null);
     setMessages([]);
     setMobileChatOpen(false);
+    setReplyTo(null);
     clearAttachment();
   }, [deviceId, clearAttachment]);
 
@@ -286,14 +292,19 @@ export default function Inbox() {
     setSending(true);
     setError("");
     try {
+      const quotedId = replyTo?.wa_message_id || null;
       const msg = file
         ? await api.sendMedia(activeChat.id, file, {
             caption: body,
             type: attachment.type,
             ptt: !!attachment.ptt,
             filename: attachment.name || file.name,
+            replyTo: quotedId,
           })
-        : await api.sendMessage(activeChat.id, body);
+        : await api.sendMessage(activeChat.id, body, { replyTo: quotedId });
+      setText("");
+      clearAttachment();
+      setReplyTo(null);
       setText("");
       clearAttachment();
       if (msg) setMessages((list) => (list.some((m) => m.id === msg.id) ? list : [...list, msg]));
@@ -485,6 +496,12 @@ export default function Inbox() {
                 ) : (
                   <div key={row.key} className={`bubble-row ${row.m.direction === "outgoing" ? "out" : "in"}`}>
                     <div className={`bubble ${row.m.is_auto_reply ? "bubble-auto" : ""}`}>
+                      {row.m.reply_to_body && (
+                        <div className={`quoted-box ${row.m.reply_to_from_me ? "quoted-out" : "quoted-in"}`}>
+                          <span className="quoted-author">{row.m.reply_to_from_me ? "Anda" : jidLabel(activeChat)}</span>
+                          <span className="quoted-body">{quotePreview({ media_caption: row.m.reply_to_body, type: "text", body: "" })}</span>
+                        </div>
+                      )}
                       <MediaContent m={row.m} />
                       {bodyText(row.m) && <div className="bubble-text">{bodyText(row.m)}</div>}
                       <div className="bubble-meta">
@@ -493,6 +510,15 @@ export default function Inbox() {
                         {row.m.direction === "outgoing" && <Ticks status={row.m.status} />}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      className="icon-btn bubble-action"
+                      title="Balas pesan ini"
+                      aria-label="Balas pesan ini"
+                      onClick={() => setReplyTo(row.m)}
+                    >
+                      ↩
+                    </button>
                   </div>
                 ),
               )}
@@ -503,6 +529,17 @@ export default function Inbox() {
 
             <form className="composer" onSubmit={send}>
               <div className="composer-body">
+                {replyTo && (
+                  <div className="reply-bar">
+                    <div className="reply-info">
+                      <span className="quoted-author">{replyTo.direction === "outgoing" ? "Anda" : jidLabel(activeChat)}</span>
+                      <span className="quoted-body">{quotePreview(replyTo)}</span>
+                    </div>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReplyTo(null)} title="Batal membalas">
+                      ✕
+                    </button>
+                  </div>
+                )}
                 {attachment && (
                   <div className="attachment-preview">
                     {(attachment.type === "image" || attachment.type === "sticker") && (

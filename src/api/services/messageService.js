@@ -125,6 +125,7 @@ async function storeMessage({
   userId,
   isAutoReply,
   at,
+  replyTo,
 }) {
   if (waMessageId) {
     const exists = await Message.findOne({ where: { chat_id: chat.id, wa_message_id: waMessageId } });
@@ -145,6 +146,14 @@ async function storeMessage({
       }
     : {};
 
+  const replyPatch = replyTo
+    ? {
+        reply_to_wa_id: replyTo.waId || null,
+        reply_to_body: replyTo.body || "",
+        reply_to_from_me: !!replyTo.fromMe,
+      }
+    : {};
+
   let message;
   try {
     message = await Message.create({
@@ -154,6 +163,7 @@ async function storeMessage({
       type,
       body,
       ...mediaPatch,
+      ...replyPatch,
       status,
       sent_by_user_id: userId || null,
       is_auto_reply: !!isAutoReply,
@@ -188,7 +198,7 @@ async function storeMessage({
  * { storageFailed: true, message: null } dikembalikan — pesan tidak dianggap gagal terkirim,
  * sehingga klien tidak mengirim ulang (pesan ganda ke pelanggan).
  */
-async function sendAndStore({ device, instance, to, send, preview, attachment, userId, isAutoReply }) {
+async function sendAndStore({ device, instance, to, send, preview, attachment, userId, isAutoReply, replyTo }) {
   const jid = toJid(to);
 
   if (isPhoneNumber(to) && !(await instance.isOnWhatsApp(jid))) {
@@ -234,6 +244,7 @@ async function sendAndStore({ device, instance, to, send, preview, attachment, u
       status: "sent",
       userId,
       isAutoReply,
+      replyTo,
     });
     return { result, chat, message, storageFailed: false };
   } catch (err) {

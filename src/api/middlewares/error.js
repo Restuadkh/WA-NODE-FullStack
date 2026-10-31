@@ -10,7 +10,11 @@ const errorHandler = (err, req, res, next) => {
 
   if (err.code === "LIMIT_FILE_SIZE") {
     status = 413;
-    message = "Ukuran file terlalu besar";
+    const mb = Math.round((err.limit || 0) / (1024 * 1024));
+    message = mb > 0 ? `Ukuran file melebihi batas ${mb} MB` : "Ukuran file terlalu besar";
+  } else if (err.code === "LIMIT_UNEXPECTED_FILE") {
+    status = 400;
+    message = "Field file tidak dikenali (harus bernama \"file\")";
   } else if (err.type === "entity.parse.failed") {
     status = 400;
     message = "Body request bukan JSON yang valid";
