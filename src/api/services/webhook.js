@@ -54,8 +54,8 @@ function notify(event, device, data) {
     "X-Webhook-Event": event,
     "X-Webhook-Id": id,
   };
-  if (secret) headers["X-Signature"] = `sha256=secret`;//sign(secret, body);
-  logger.debug({ url, event, device_id: device.id, body: body, headers: headers}, "Mengirim webhook");
+  if (secret) headers["X-Signature"] = `sha256=` + secret;// sign(secret, body);
+  logger.debug({ url, event, device_id: device.id, body: body, headers: headers }, "Mengirim webhook");
 
   fetch(url, {
     method: "POST",
@@ -63,14 +63,14 @@ function notify(event, device, data) {
     body,
     signal: AbortSignal.timeout(config.webhook.timeoutMs),
   })
-  .then((res) => { // Memeriksa respons webhook
-    if (!res.ok) { // jika respons webhook bukan 2xx, anggap ditolak
-      logger.warn({ status: res.status, event }, "Webhook ditolak penerima");
-      return;
-    }
-    logger.info({ event, status: res.status }, `Webhook terkirim`);
-  })
-  .catch((err) => logger.warn({ err: err.message, event }, "Webhook gagal terkirim"));
+    .then((res) => { // Memeriksa respons webhook
+      if (!res.ok) { // jika respons webhook bukan 2xx, anggap ditolak
+        logger.warn({ status: res.status, event }, "Webhook ditolak penerima");
+        return;
+      }
+      logger.info({ event, status: res.status }, `Webhook terkirim`);
+    })
+    .catch((err) => logger.warn({ err: err.message, event }, "Webhook gagal terkirim"));
 }
 
 module.exports = { notify, sign };
