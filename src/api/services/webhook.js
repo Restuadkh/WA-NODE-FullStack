@@ -54,7 +54,7 @@ function notify(event, device, data) {
     "X-Webhook-Event": event,
     "X-Webhook-Id": id,
   };
-  if (secret) headers["X-Signature"] = `sha256=` + secret;// sign(secret, body);
+  if (secret) headers["X-Signature"] = secret;// sign(secret, body);
   logger.debug({ url, event, device_id: device.id, body: body, headers: headers }, "Mengirim webhook");
 
   fetch(url, {
