@@ -28,6 +28,11 @@ const chatUpload = multer(uploadOptions).single("file");
 
 router.get("/status", (req, res) => res.json({ status: "ok" }));
 
+// ---- Redial via crontab/task scheduler (tanpa JWT; token = CRON_SECRET)
+// Redial semua device yang tidak online, atau satu device: ?key=<instance_key> / ?id=<device_id>
+router.post("/cron/redial", devices.cronRedial);
+router.get("/cron/redial", devices.cronRedial);
+
 // ---- Login (maks 10 percobaan / 15 menit per IP)
 router.post("/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), auth.login);
 
@@ -74,6 +79,8 @@ router.patch("/devices/:id", admin, devices.updateDevice);
 // QR / pairing code = kunci menautkan nomor WhatsApp, jadi hanya admin
 router.get("/devices/:id/qr", admin, devices.getDeviceQr);
 router.get("/devices/:id/status", devices.getDeviceStatus);
+// Redial paksa satu device (admin): putus lalu mulai ulang koneksinya.
+router.post("/devices/:id/redial", admin, devices.redialDevice);
 router.delete("/devices/:id", admin, devices.removeDevice);
 
 router.get("/devices/:deviceId/chats", chats.listChats);

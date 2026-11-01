@@ -1,4 +1,5 @@
 const { sendAndStore, PREVIEW } = require("../services/messageService");
+const manager = require("../whatsapp/manager");
 // Dipanggil lewat objek modul (safeFetch.fetchRemoteMedia) agar mudah di-stub di test.
 const safeFetch = require("../../utils/safeFetch");
 
@@ -82,8 +83,25 @@ async function mediaUrl(req, res) {
   res.status(201).json({ error: false, data: result });
 }
 
+// Redial paksa untuk device pemilik API key ini (X-Api-Key: <instance_key>).
+// Dipakai crontab/monitoring: selalu memulai ulang koneksi walau sedang connected.
+// Bisa juga dibatasi bila sudah online: kirim body { only_if_offline: true }.
+async function redial(req, res) {
+  const onlyIfOffline = ["true", "1", "yes", "on"].includes(
+    String(req.body?.only_if_offline).toLowerCase(),
+  );
+  const instance = req.instance || (await manager.ensure(req.device));
+  if (onlyIfOffline && instance.online) {
+    return res.json({ error: false, data: { redialed: false, status: instance.status } });
+  }
+  await manager.redial(req.device);
+  const after = manager.get(req.device.instance_key);
+  res.json({ error: false, data: { redialed: true, status: after?.status || "starting" } });
+}
+
 module.exports = {
   text,
+
   image: uploadHandler("image"),
   video: uploadHandler("video"),
   audio: uploadHandler("audio"),

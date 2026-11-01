@@ -1,4 +1,4 @@
-const { randomUUID } = require("crypto");
+const { randomUUID, timingSafeEqual } = require("crypto");
 const sequelize = require("../../config/database");
 const { Op } = require("sequelize");
 const config = require("../../config/config");
@@ -163,6 +163,58 @@ async function getDeviceStatus(req, res) {
 
 // Logout dari WhatsApp lalu hapus device beserta chat dan rule-nya.
 // Semua penghapusan DB dalam satu transaksi agar tidak ada data yang setengah terhapus.
+// Redial paksa satu device (dashboard, admin): putus koneksi lalu mulai ulang dari nol.
+// Memulihkan kondisi yang tidak bisa di-heal watchdog (connectionReplaced, sesi start
+// terbatas yang habis percobaannya, timer reconnect yang hilang).
+async function redialDevice(req, res) {
+  const device = await findDevice(req.params.id);
+  await assertDeviceAccess(req.user, device.id);
+  await manager.redial(device);
+  res.json({ error: false, message: "Redial dijalankan untuk device ini", data: { device_id: device.id, status: "disconnected" } });
+}
+
+// Redial via crontab/task scheduler tanpa JWT: autentikasi lewat CRON_SECRET.
+// Semua device offline/disconnected di-start ulang; device yang online tidak disentuh,
+// sehingga cron bisa dijalankan berkala tanpa memutus koneksi yang sehat.
+async function cronRedial(req, res) {
+  const secret = config.cron.secret;
+  if (!secret) throw httpError("Endpoint cron tidak aktif (isi CRON_SECRET di .env)", 404);
+
+  const provided = String(req.query.token ?? req.body?.token ?? "");
+  const ok =
+    provided.length === secret.length &&
+    timingSafeEqual(Buffer.from(provided), Buffer.from(secret));
+  if (!ok) throw httpError("Token cron tidak valid", 401);
+
+  // Redial satu device tertentu: ?key=<instance_key> atau ?id=<device_id>
+  let targets;
+  if (req.query.key) {
+    targets = await Device.findAll({ where: { instance_key: String(req.query.key) } });
+  } else if (req.query.id) {
+    targets = (await findDevice(req.query.id)) ? [await Device.findByPk(req.query.id)] : [];
+  } else {
+    // Semua device yang pernah tertaut kecuali yang sedang online.
+    targets = await Device.findAll({
+      where: { status: { [Op.ne]: "connected" } },
+      order: [["last_connected_at", "DESC"]],
+    });
+  }
+
+  const results = [];
+  for (const device of targets) {
+    try {
+      // Jeda kecil antar device agar tidak menumpuk transaksi koneksi bersamaan.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await manager.redial(device);
+      results.push({ device_id: device.id, name: device.name, ok: true });
+    } catch (err) {
+      logger.error({ err, device: device.id }, "Gagal redial device lewat cron");
+      results.push({ device_id: device.id, name: device.name, ok: false, error: err.message });
+    }
+  }
+  res.json({ error: false, data: { count: results.length, results } });
+}
+
 async function removeDevice(req, res) {
   const device = await findDevice(req.params.id);
   await assertDeviceAccess(req.user, device.id);
@@ -192,6 +244,8 @@ module.exports = {
   getDeviceQr,
   getDeviceStatus,
   removeDevice,
+  redialDevice,
+  cronRedial,
   findDevice,
   httpError,
 };

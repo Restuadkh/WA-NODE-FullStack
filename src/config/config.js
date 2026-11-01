@@ -60,6 +60,12 @@ module.exports = {
     qrStartMaxAttempts: int(process.env.DEVICE_QR_START_ATTEMPTS, 3),
   },
 
+  // Endpoint redial otomatis (/api/cron/*) untuk dihit dari crontab/task scheduler.
+  // Kosong = endpoint dinonaktifkan (404).
+  cron: {
+    secret: process.env.CRON_SECRET || "",
+  },
+
   gatewayApi: {
     protect: bool(process.env.PROTECT_ROUTES),
     token: process.env.TOKEN || "",

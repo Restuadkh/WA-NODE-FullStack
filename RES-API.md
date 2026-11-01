@@ -766,6 +766,66 @@ GET /api/devices/:id/status
 
 Nilai `status`: `pending_qr` | `connected` | `disconnected` | `logged_out`.
 
+### 5.4a Redial Device **Admin**
+
+```http
+POST /api/devices/:id/redial
+```
+
+Putus koneksi device lalu mulai ulang dari nol. Berguna untuk memulihkan kondisi yang tidak
+akan di-heal otomatis, mis. `connectionReplaced` (sesi dibuka di tempat lain) atau sesi start
+terbatas yang sudah habis batas percobaannya.
+
+**Response `200`**
+
+```json
+{ "error": false, "message": "Redial dijalankan untuk device ini", "data": { "device_id": 1, "status": "disconnected" } }
+```
+
+### 5.4b Redial via Crontab — `/api/cron/redial`
+
+Endpoint khusus untuk dihit berkala oleh crontab / task scheduler **tanpa JWT**.
+Autentikasi memakai token `CRON_SECRET` (set di `.env`; kosong = endpoint disabled/404).
+
+```http
+POST /api/cron/redial?token=<CRON_SECRET>
+```
+
+Tanpa parameter lain: **semua device yang tidak `connected` di-start ulang**; device yang
+sedang online tidak disentuh, jadi aman dijalankan berkala. untuk satu device saja:
+
+| Query | Arti |
+|---|---|
+| `?id=<device_id>` | Redial device dengan ID tertentu |
+| `?key=<instance_key>` | Redial device dengan instance_key tertentu |
+
+**Response `200`**
+
+```json
+{
+  "error": false,
+  "data": {
+    "count": 2,
+    "results": [
+      { "device_id": 1, "name": "Device A", "ok": true },
+      { "device_id": 2, "name": "Device B", "ok": true }
+    ]
+  }
+}
+```
+
+Contoh crontab (redial tiap 10 menit):
+
+```cron
+*/10 * * * * curl -s -X POST "http://localhost:3000/api/cron/redial?token=<CRON_SECRET>" > /dev/null
+```
+
+Windows Task Scheduler:
+
+```batch
+curl -s -X POST "http://localhost:3000/api/cron/redial?token=<CRON_SECRET>"
+```
+
 ### 5.5 Hapus Device **Admin**
 
 ```http

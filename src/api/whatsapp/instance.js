@@ -377,6 +377,34 @@ class WhatsAppInstance extends EventEmitter {
   }
 
   /**
+   * Redial paksa (API/crontab): putus koneksi yang ada lalu mulai ulang dari nol.
+   * Memulihkan kondisi yang TIDAK bisa di-heal watchdog:
+   *   - sesi digantikan koneksi lain (replaced = true),
+   *   - sesi start terbatas yang habis percobaannya,
+   *   - timer reconnect/watchdog yang hilang.
+   * Aman dipanggil kapan saja; tidak mengganggu sesi lain (seperti timer reconnect).
+   */
+  async redial() {
+    logger.info({ key: this.key }, "Redial paksa: memulai ulang koneksi WhatsApp");
+    this.generation += 1; // batalkan timer/socket dari generasi sebelumnya
+    this.starting = null;
+    this.stopped = false;
+    this.bounded = null;
+    this.boundedCooldownUntil = 0;
+    this.replaced = false; // redial = aksi sadar, boleh mencoba lagi walau sempat digantikan
+    this.reconnectAttempts = 0;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    clearInterval(this.watchdog);
+    this.watchdog = null;
+    if (this.sock) {
+      this._closeSocket();
+      this._setStatus("disconnected");
+    }
+    return this.start();
+  }
+
+  /**
    * Jaring pengaman healing ("max healing tetapi lambat"): interval ringan per instance
    * yang memastikan device tidak menggantung di status "disconnected" tanpa upaya reconnect
    * (mis. timer hilang, exception di jalur yang tidak diperhitungkan, atau batas percobaan

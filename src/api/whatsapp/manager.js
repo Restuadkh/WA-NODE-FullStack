@@ -68,6 +68,14 @@ async function ensure(device, opts = {}) {
 
 const get = (key) => instances.get(key);
 
+// Redial paksa: pastikan instance ada (buat bila belum), lalu mulai ulang koneksinya.
+async function redial(device) {
+  const existing = instances.get(device.instance_key);
+  if (!existing) return ensure(device);
+  existing.device = device;
+  return existing.redial();
+}
+
 async function remove(device) {
   const instance = instances.get(device.instance_key) || create(device);
   await instance.logout();
@@ -121,4 +129,4 @@ async function stopAll() {
   await Promise.allSettled([...instances.values()].map((i) => i.stop()));
 }
 
-module.exports = { ensure, get, remove, refreshDevice, restoreAll, stopAll };
+module.exports = { ensure, get, redial, remove, refreshDevice, restoreAll, stopAll };
