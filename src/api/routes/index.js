@@ -76,11 +76,11 @@ message.post("/queue/mediaurl", enqueueOnly, queue.enqueueMediaUrl);
 router.use("/message", message);
 
 // ---- Dashboard (JWT). Hanya path dashboard yang dijaga, sehingga path tak dikenal tetap 404.
-router.use(["/devices", "/chats", "/rules", "/jobs", "/users"], authMiddleware);
+router.use(["/devices", "/chats", "/rules", "/jobs", "/users", "/roles"], authMiddleware);
 
 router.get("/devices", devices.listDevices);
-// Aksi device kini mengikuti izin per role (_rolePermissions: diatur super_admin/admin), bukan "role admin" mentah.
-// Agent bisa: lihat device, buka QR/status. Tambahan (edit/hapus/...) lewat izin yang dikonfigurasi.
+// Aksi device mengikuti matriks izin per role (halaman Pengguna → Rule akses per role),
+// bukan role "admin" mentah. Scope device tetap dibatasi penugasan (device_agents).
 router.post("/devices", perm("devices_add"), devices.createDevice);
 router.put("/devices/:id", perm("devices_edit"), devices.updateDevice);
 router.patch("/devices/:id", perm("devices_edit"), devices.updateDevice);

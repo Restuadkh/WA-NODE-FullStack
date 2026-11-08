@@ -284,7 +284,7 @@ export default function Users() {
                 });
               }}>
                 <option value="agent">agent</option>
-                <option value="admin">admin</option>
+                {(me?.role === "super_admin" || form.role === "admin") && <option value="admin">admin</option>}
                 {(me?.role === "super_admin" || form.role === "super_admin") && <option value="super_admin">super_admin</option>}
               </select>
             </label>

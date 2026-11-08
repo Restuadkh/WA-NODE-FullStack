@@ -3,10 +3,20 @@ const { Op } = require("sequelize");
 const { User, Device, DeviceAgent } = require("../models");
 
 const httpError = require("../services/httpError");
+const { allowedDeviceIds } = require("../services/deviceAccess");
 
 const ROLES = ["super_admin", "admin", "agent"];
 // Semua varian admin (super_admin + admin) dihitung sebagai admin untuk proteksi "admin terakhir".
 const ADMIN_ROLES = ["super_admin", "admin"];
+
+// Hierarki manajemen akun: admin biasa hanya boleh mengurus akun agent;
+// akun dengan role admin/super_admin hanya boleh diurus super_admin.
+function assertCanManage(req, targetRole, action) {
+  if (req.user?.role === "super_admin") return;
+  if (targetRole && targetRole !== "agent") {
+    throw httpError(`Hanya super admin yang boleh ${action} akun admin`, 403);
+  }
+}
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Daftar user beserta device yang ditugaskan. instance_key tidak ikut.
@@ -45,7 +55,10 @@ async function createUser(req, res) {
   if (!EMAIL_RE.test(email)) throw httpError("Email tidak valid", 400);
   if (password.length < 8) throw httpError("Password minimal 8 karakter", 400);
 
-  // Membuat user bersifat super_admin hanya boleh oleh super_admin.
+  // Membuat akun admin/super_admin hanya boleh oleh super_admin.
+  if (role !== "agent" && req.user?.role !== "super_admin") {
+    throw httpError("Hanya super admin yang boleh membuat akun admin", 403);
+  }
   if (role === "super_admin" && req.user?.role !== "super_admin") {
     throw httpError("Hanya super admin yang boleh membuat super admin", 403);
   }
@@ -54,7 +67,7 @@ async function createUser(req, res) {
   if (exists) throw httpError("Email sudah dipakai", 409);
 
   const user = await User.create({ name, email, role, password: await bcrypt.hash(password, 10) });
-  const deviceIds = body.device_ids !== undefined ? await assignDevices(user, body.device_ids) : [];
+  const deviceIds = body.device_ids !== undefined ? await assignDevices(user, body.device_ids, req.user) : [];
   res.status(201).json({ error: false, data: serializeUser(user, deviceIds) });
 }
 
@@ -62,6 +75,8 @@ async function createUser(req, res) {
 async function updateUser(req, res) {
   const user = await User.findByPk(req.params.id);
   if (!user) throw httpError("User tidak ditemukan", 404);
+  // Akun admin/super_admin hanya diurus super_admin.
+  assertCanManage(req, user.role, "mengedit");
   const body = req.body || {};
   const patch = {};
 
@@ -72,9 +87,13 @@ async function updateUser(req, res) {
   }
   if (body.role !== undefined) {
     if (!ROLES.includes(body.role)) throw httpError("role harus super_admin, admin, atau agent", 400);
+    // Role admin/super_admin hanya boleh diatur super_admin.
+    if (req.user?.role !== "super_admin" && ADMIN_ROLES.includes(body.role)) {
+      throw httpError("Hanya super admin yang boleh menetapkan role admin", 403);
+    }
     // Super admin hanya bisa diatur oleh super_admin.
-    if (req.user?.role !== "super_admin" && body.role !== user.role && (body.role === "super_admin" || user.role === "super_admin")) {
-      throw httpError("Hanya super admin yang boleh mengatur role super admin", 403);
+    if (req.user?.role !== "super_admin" && user.role === "super_admin") {
+      throw httpError("Hanya super admin yang boleh mengatur akun super admin", 403);
     }
     patch.role = body.role;
   }
@@ -92,7 +111,7 @@ async function updateUser(req, res) {
   await user.update(patch);
 
   let deviceIds;
-  if (body.device_ids !== undefined) deviceIds = await assignDevices(user, body.device_ids);
+  if (body.device_ids !== undefined) deviceIds = await assignDevices(user, body.device_ids, req.user);
 
   res.json({ error: false, data: serializeUser(user, deviceIds) });
 }
@@ -101,6 +120,8 @@ async function updateUser(req, res) {
 async function deleteUser(req, res) {
   const user = await User.findByPk(req.params.id);
   if (!user) throw httpError("User tidak ditemukan", 404);
+  // Akun admin/super_admin hanya dihapus super_admin (proteksi admin terakhir tetap berlaku).
+  assertCanManage(req, user.role, "menghapus");
   if (user.id === req.user.id) throw httpError("Tidak bisa menghapus akun sendiri", 409);
   if (ADMIN_ROLES.includes(user.role)) {
     const admins = await User.count({ where: { role: ADMIN_ROLES } });
@@ -113,7 +134,9 @@ async function deleteUser(req, res) {
 
 // Ganti penugasan device seorang user. Hanya super_admin yang punya akses penuh;
 // admin & agent mengakses device lewat penugasan ini (masing-masing punya device sendiri).
-async function assignDevices(user, deviceIds) {
+// PENTING: penugasan oleh admin biasa tidak boleh menyertakan device yang bukan miliknya —
+// kalau tidak, admin yang dibatasi bisa "memberi" dirinya device admin lain (bypass ACL).
+async function assignDevices(user, deviceIds, owner) {
   if (!Array.isArray(deviceIds)) throw httpError("device_ids harus berupa array ID device", 400);
   const unique = [...new Set(deviceIds.map(String))];
   if (unique.length) {
@@ -121,6 +144,15 @@ async function assignDevices(user, deviceIds) {
     const foundIds = new Set(found.map((d) => d.id));
     const invalid = unique.filter((id) => !foundIds.has(id));
     if (invalid.length) throw httpError(`Device tidak ditemukan: ${invalid.join(", ")}`, 400);
+
+    // Pemanggil bukan super_admin hanya bisa menugaskan device yang dia miliki sendiri.
+    if (owner?.role !== "super_admin") {
+      const allowed = (await allowedDeviceIds(owner)) || [];
+      const forbidden = unique.filter((id) => !allowed.includes(id));
+      if (forbidden.length) {
+        throw httpError("Anda hanya bisa menugaskan device yang ditugaskan/dibuat oleh Anda", 403);
+      }
+    }
   }
   await DeviceAgent.destroy({ where: { user_id: user.id } });
   if (unique.length) {

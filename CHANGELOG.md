@@ -19,7 +19,11 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
   - Super admin mengatur rule akses role **admin & agent**; admin hanya role **agent**; izin `super_admin` terkunci (selalu akses penuh).
   - Aksi yang bisa diatur: tambah/edit/hapus/redial device, kelola rule auto-reply, batalkan/ulangi job antrean.
   - Ditegakkan di backend via `requirePermission()` (403 bila izin tidak diberikan) dan ditampilkan sebagai tabel checkbox di menu **Pengguna → Rule akses per role**.
-  - Les routes device/rule/jobs kini memakai izin, bukan role "admin" mentah; scope device tetap dibatasi penugasan (`device_agents`).
+  - Semua route device/rule/jobs kini memakai izin, bukan role "admin" mentah; scope device tetap dibatasi penugasan (`device_agents`).
+- **Hierarki manajemen akun diperketat** — (perbaikan pasca-audit):
+  - `/api/roles/*` kini dilindungi JWT (sebelumnya tidak masuk daftar path yang dijaga).
+  - Admin biasa **tidak bisa** membuat/mengedit/menghapus akun admin (hanya super admin) maupun menetapkan role `admin`/`super_admin`.
+  - Admin biasa hanya bisa menugaskan **device miliknya sendiri** saat mengelola user — menutup celah admin yang dibatasi memberi dirinya device admin lain.
 - **Halaman Dok API dilengkapi** — tabel "Dashboard API (JWT)" berisi semua endpoint `/api/devices*`, `/api/chats*`, `/api/rules*`, `/api/jobs*`, `/api/users*`, `/api/roles/permissions*`, `/api/cron/redial`, beserta matriks akses per role.
 
 ## [2.5.0] — 2026-10-29
