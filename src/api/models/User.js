@@ -8,6 +8,8 @@ const User = sequelize.define("User", {
   password: { type: DataTypes.STRING, allowNull: false },
   // super_admin = akses penuh SEMUA device; admin = hanya device yang ditugaskan/dibuatnya; agent = hanya device penugasan.
   role: { type: DataTypes.ENUM("super_admin", "admin", "agent"), defaultValue: "agent" },
+  // Hierarki pembuatan akun: siapa yang membuat user ini (1 super_admin > admin > agent milik admin).
+  created_by: { type: DataTypes.UUID, allowNull: true },
 });
 
 module.exports = User;

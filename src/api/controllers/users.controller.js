@@ -9,12 +9,18 @@ const ROLES = ["super_admin", "admin", "agent"];
 // Semua varian admin (super_admin + admin) dihitung sebagai admin untuk proteksi "admin terakhir".
 const ADMIN_ROLES = ["super_admin", "admin"];
 
-// Hierarki manajemen akun: admin biasa hanya boleh mengurus akun agent;
-// akun dengan role admin/super_admin hanya boleh diurus super_admin.
-function assertCanManage(req, targetRole, action) {
-  if (req.user?.role === "super_admin") return;
-  if (targetRole && targetRole !== "agent") {
+// Hierarki pembuatan akun: 1 super_admin > banyak admin > agent milik masing-masing admin.
+// - super_admin boleh mengatur semua akun.
+// - admin boleh mengatur: dirinya sendiri + akun yang DIA buat (harus ber-peran agent).
+// - akun agent tidak punya akses ke route user sama sekali (dijaga route /users).
+function assertCanManage(req, target, action) {
+  if (req.user?.role === "super_admin") return; // super admin mengatur semua
+  if (target.role !== "agent") {
     throw httpError(`Hanya super admin yang boleh ${action} akun admin`, 403);
+  }
+  const isMine = target.created_by === req.user?.id || target.id === req.user?.id;
+  if (!isMine) {
+    throw httpError(`Anda hanya bisa ${action} akun yang Anda buat sendiri`, 403);
   }
 }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,13 +33,19 @@ function serializeUser(user, deviceIds) {
     email: user.email,
     role: user.role,
     device_ids: deviceIds || [],
+    created_by: user.created_by || null, // admin pembuat (untuk hierarki antar-admin)
     created_at: user.createdAt,
   };
 }
 
 // GET /api/users (admin)
+// super_admin melihat semua; admin hanya melihat dirinya + agent yang ia buat.
 async function listUsers(req, res) {
-  const users = await User.findAll({ order: [["createdAt", "ASC"]] });
+  const where =
+    req.user?.role === "super_admin"
+      ? {}
+      : { [Op.or]: [{ id: req.user.id }, { created_by: req.user.id }] };
+  const users = await User.findAll({ where, order: [["createdAt", "ASC"]] });
   const links = await DeviceAgent.findAll({ attributes: ["user_id", "device_id"] });
   const byUser = new Map();
   for (const link of links) {
@@ -66,7 +78,14 @@ async function createUser(req, res) {
   const exists = await User.findOne({ where: { email } });
   if (exists) throw httpError("Email sudah dipakai", 409);
 
-  const user = await User.create({ name, email, role, password: await bcrypt.hash(password, 10) });
+  const user = await User.create({
+    name,
+    email,
+    role,
+    password: await bcrypt.hash(password, 10),
+    // Hierarki: catat pembuat akun (1 super_admin > admin > agent milik admin tsb).
+    created_by: req.user?.id || null,
+  });
   const deviceIds = body.device_ids !== undefined ? await assignDevices(user, body.device_ids, req.user) : [];
   res.status(201).json({ error: false, data: serializeUser(user, deviceIds) });
 }
@@ -75,8 +94,8 @@ async function createUser(req, res) {
 async function updateUser(req, res) {
   const user = await User.findByPk(req.params.id);
   if (!user) throw httpError("User tidak ditemukan", 404);
-  // Akun admin/super_admin hanya diurus super_admin.
-  assertCanManage(req, user.role, "mengedit");
+  // Hierarki: akun admin hanya dipacu super_admin; selain itu hanya akun yang dia buat sendiri.
+  assertCanManage(req, user, "mengedit");
   const body = req.body || {};
   const patch = {};
 
@@ -120,8 +139,9 @@ async function updateUser(req, res) {
 async function deleteUser(req, res) {
   const user = await User.findByPk(req.params.id);
   if (!user) throw httpError("User tidak ditemukan", 404);
-  // Akun admin/super_admin hanya dihapus super_admin (proteksi admin terakhir tetap berlaku).
-  assertCanManage(req, user.role, "menghapus");
+  // Hierarki: hanya super_admin yang boleh menghapus akun lain di luar agen miliknya
+  // (admin terakhir tetap terlindungi).
+  assertCanManage(req, user, "menghapus");
   if (user.id === req.user.id) throw httpError("Tidak bisa menghapus akun sendiri", 409);
   if (ADMIN_ROLES.includes(user.role)) {
     const admins = await User.count({ where: { role: ADMIN_ROLES } });

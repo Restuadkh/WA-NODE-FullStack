@@ -40,6 +40,11 @@ const REPLY_COLUMNS = {
   reply_to_from_me: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 };
 
+// Tabel `users` lama: kolom hierarki created_by (siapa admin pembuat akun ini).
+const USER_HIERARCHY_COLUMNS = {
+  created_by: { type: DataTypes.UUID, allowNull: true },
+};
+
 // Role super_admin (v2.7). Tabel `users` lama belum punya nilai ENUM ini.
 const USER_ROLE_VALUES = ["super_admin", "admin", "agent"];
 
@@ -121,9 +126,14 @@ async function ensureMessageTypeEnum({ log = () => {}, dryRun = false } = {}) {
   return { changed: true };
 }
 
+// Kolom hierarki created_by pada tepi tabel users lama.
+async function ensureUserColumns(options = {}) {
+  const { User } = require("../models");
+  return ensureColumns(User, USER_HIERARCHY_COLUMNS, options);
+}
+
 // Tambah nilai ENUM "super_admin" pada kolom role tabel users lama (MySQL/MariaDB).
-async function ensureUserRoleEnum({ log = () => {}, dryRun = false } = {}) {
-  if (sequelize.getDialect() !== "mysql") return { changed: false };
+async function ensureUserRoleEnum({ log = () => {}, dryRun = false } = {}) {  if (sequelize.getDialect() !== "mysql") return { changed: false };
 
   const { User } = require("../models");
   const qi = sequelize.getQueryInterface();
@@ -178,6 +188,7 @@ module.exports = {
   ensureMediaSchema,
   ensureMediaColumns,
   ensureMessageTypeEnum,
+  ensureUserColumns,
   ensureUserRoleEnum,
   ensureDeviceWebhookSchema,
   ensureDeviceWebhookColumns,

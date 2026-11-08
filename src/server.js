@@ -16,7 +16,7 @@ require("./api/models");
 const app = require("./app");
 const { initRealtime } = require("./api/services/realtime");
 const { ensureIndexes } = require("./api/services/dbIndexes");
-const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns, ensureUserRoleEnum } = require("./api/services/dbSchema");
+const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns, ensureUserRoleEnum, ensureUserColumns } = require("./api/services/dbSchema");
 const manager = require("./api/whatsapp/manager");
 const queueService = require("./api/services/queueService");
 
@@ -47,6 +47,12 @@ async function main() {
     });
     // Pasang index v2.1 bila bisa. Pada DB lama yang berisi duplikat ini hanya memberi peringatan
     // (server tetap jalan); rapikan dengan: npm run db:upgrade
+    // Patch kolom created_by pada tabel users lama (hierarki pembuatan akun).
+    await ensureUserColumns({
+      tolerant: true,
+      log: (m) => logger.debug(m),
+      warn: (m) => logger.warn(m),
+    });
     // Patch ENUM role users (v2.7): tambah nilai "super_admin".
     await ensureUserRoleEnum({
       tolerant: true,
