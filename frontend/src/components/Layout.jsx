@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useAuth } from "../auth";
 
 const Icon = ({ d }) => (
@@ -7,12 +8,50 @@ const Icon = ({ d }) => (
   </svg>
 );
 
+const FONT_KEY = "wa_font_small";
+
 export default function Layout() {
   const { user, logout } = useAuth();
+  // Mode font kecil (A-) — pilihan tersimpan dan diterapkan ke seluruh halaman.
+  const [smallFont, setSmallFont] = useState(() => localStorage.getItem(FONT_KEY) === "1");
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("font-small", smallFont);
+    localStorage.setItem(FONT_KEY, smallFont ? "1" : "0");
+  }, [smallFont]);
+
+  // Sidebar drawer di smartphone: dibuka lewat tombol hamburger di bar atas,
+  // ditutup dengan menyentuh backdrop / memilih menu / menekan Esc.
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e) => e.key === "Escape" && setNavOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <header className="topbar">
+        <button
+          className="btn btn-ghost btn-sm hamburger icon-btn"
+          onClick={() => setNavOpen(true)}
+          aria-label="Buka menu"
+        >
+          ☰
+        </button>
+        <span className="topbar-title">WA Dashboard</span>
+      </header>
+
+      {navOpen && <div className="backdrop" onClick={() => setNavOpen(false)} />}
+
+      <aside
+        className={`sidebar ${navOpen ? "open" : ""}`}
+        onClick={(e) => {
+          // Tutup drawer setelah menu dipilih (klik di batang nav).
+          if (e.target.closest(".nav")) setNavOpen(false);
+        }}
+      >
         <div className="brand">
           <span className="brand-mark">
             <Icon d="M4 20l1.4-4.2A8 8 0 1 1 8.2 18.6z" />
@@ -56,9 +95,19 @@ export default function Layout() {
               {user?.email} · {user?.role}
             </div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={logout}>
-            Keluar
-          </button>
+          <div className="foot-actions">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setSmallFont((v) => !v)}
+              title={smallFont ? "Kembalikan ukuran font normal" : "Perkecil ukuran font"}
+              aria-label={smallFont ? "Font normal" : "Font kecil"}
+            >
+              {smallFont ? "A+" : "A−"}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={logout}>
+              Keluar
+            </button>
+          </div>
         </div>
       </aside>
 

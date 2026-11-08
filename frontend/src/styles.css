@@ -167,12 +167,12 @@ h2 { font-size: 17px; }
 .content { min-width: 0; overflow: auto; }
 
 /* ---------- Page ---------- */
-.page { padding: 28px; max-width: 1040px; }
+.page { padding: 28px; max-width: 1040px; margin: 0 auto; width: 100%; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
 .page-head p { margin: 4px 0 0; }
 .form-row { display: flex; gap: 12px; align-items: flex-end; padding: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .form-row .field { margin-bottom: 0; min-width: 200px; }
-.table-card { overflow: hidden; }
+.table-card { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
 .table { width: 100%; border-collapse: collapse; }
 .table th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 11px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
 .table td { padding: 13px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -185,12 +185,12 @@ h2 { font-size: 17px; }
 
 /* ---------- Modal / QR ---------- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(8, 14, 11, 0.55); display: grid; place-items: center; padding: 16px; z-index: 50; }
-.modal { background: var(--surface); border-radius: 16px; padding: 22px; width: 100%; max-width: 380px; border: 1px solid var(--border); }
+.modal { background: var(--surface); border-radius: 16px; padding: 22px; width: 100%; max-width: 380px; border: 1px solid var(--border); max-height: calc(100dvh - 32px); overflow-y: auto; }
 .modal.wide { max-width: 540px; }
 .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
 .modal-head h2 { margin-bottom: 6px; }
 .modal-head p { margin: 0; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 
 .check-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .check-item { display: flex; gap: 8px; align-items: center; font-size: 13px; }
@@ -203,7 +203,7 @@ h2 { font-size: 17px; }
 .radio-item .muted.small { display: block; margin-top: 2px; font-size: 11px; }
 
 /* Halaman dokumentasi API */
-.docs-card { padding: 18px 20px; margin-bottom: 14px; }
+.docs-card { padding: 18px 20px; margin-bottom: 14px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .docs-card h2 { margin-bottom: 4px; }
 .docs-card h3 { margin: 14px 0 4px; font-size: 14px; }
 .docs pre {
@@ -218,7 +218,7 @@ h2 { font-size: 17px; }
   white-space: pre;
 }
 .docs code.inline { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
-.docs table { width: 100%; font-size: 13px; }
+.docs table { width: 100%; font-size: 13px; min-width: 520px; }
 .docs .method { font-family: monospace; font-weight: 700; }
 .form-hint { flex-basis: 100%; margin: 4px 0 0; }
 .qr-area { display: grid; place-items: center; min-height: 280px; background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
@@ -292,31 +292,109 @@ h2 { font-size: 17px; }
 .composer-alert { margin: 0; border-radius: 0; }
 
 /* ---------- Responsive ---------- */
+/* Bar atas & tombol hamburger: hanya tampil di layar kecil (sidebar drawer). */
+.topbar { display: none; }
+.backdrop { display: none; }
+
+/* Tablet & ponsel: sidebar menjadi drawer geser dari kiri; chat dua panel menjadi satu panel + tombol kembali. */
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .sidebar { flex-direction: row; align-items: center; padding: 8px 12px; gap: 8px; border-right: 0; border-bottom: 1px solid var(--border); }
-  .brand { padding: 0; }
-  .brand span:last-child { display: none; }
-  .nav { flex-direction: row; }
-  .sidebar-foot { border: 0; padding: 0; flex-direction: row; align-items: center; }
-  .who { display: none; }
-  .page { padding: 18px 14px; }
+
+  .topbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .topbar-title { font-weight: 700; font-size: 15px; }
+  .hamburger { font-size: 18px; }
+
+  /* Pemakai menu: lapisan gelap yang menutup halaman & menutup drawer dengan sentuhan */
+  .backdrop {
+    display: block; position: fixed; inset: 0; z-index: 30;
+    background: rgba(8, 14, 11, 0.45);
+  }
+
+  /* Sidebar = drawer penuh yang awalnya tergeser keluar layar */
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: min(260px, 82vw);
+    z-index: 40; flex-direction: column; padding: 16px 12px;
+    transform: translateX(-105%); transition: transform 0.2s ease;
+    box-shadow: var(--shadow);
+  }
+  .sidebar.open { transform: none; }
+  .brand { padding: 4px 8px 18px; } /* label brand & menu tampil lengkap lagi di drawer */
+
+  .page { padding: 18px 14px; max-width: 100%; }
   .inbox { grid-template-columns: 1fr; }
   .inbox .chat-panel { display: none; }
   .inbox.show-chat .chat-list { display: none; }
   .inbox.show-chat .chat-panel { display: flex; }
   .back { display: inline-block; }
-  .table th:nth-child(4), .table td:nth-child(4) { display: none; }
   .page-head { flex-wrap: wrap; }
-  .sidebar-foot .btn { flex: none; }
+  .form-row .field { min-width: 140px; flex: 1 1 45%; }
+
+  /* Tabel: semua kolom tetap ada, digeser horizontal di dalam kartu */
+  .table-card { overflow-x: auto; }
+  .table { min-width: 560px; }
+  .actions { justify-content: flex-end; }
+  .doc-link { max-width: 100%; }
 }
 
-/* Ponsel kecil: menu hanya ikon (label hanya untuk menu aktif) agar bar atas tidak meluber */
+/* Ponsel kecil: buka mode kompak */
 @media (max-width: 520px) {
-  .nav-link { padding: 9px; }
-  .nav-link:not(.active) span { display: none; }
   .composer { padding: 10px 12px; }
-  .table th, .table td { padding: 10px 10px; }
+
+  /* Font & ukuran menyusut supaya konten tetap rapi di layar sempit */
+  body { font-size: 13px; }
+  h1 { font-size: 18px; }
+  h2 { font-size: 15px; }
+  .small { font-size: 11px; }
+  .mono { font-size: 12px; }
+  .badge { font-size: 11px; padding: 2px 7px; }
+  code { font-size: 11px; }
+
+  .page { padding: 14px 10px; }
+  .page-head { gap: 10px; }
+  .btn { padding: 7px 11px; }
+  .btn-sm { padding: 5px 8px; font-size: 12px; }
+
+  .table { min-width: 480px; }
+  .table th { padding: 8px 10px; font-size: 11px; white-space: nowrap; }
+  .table td { padding: 10px 8px; font-size: 12.5px; }
+  .job-text, .job-error, .job-target { max-width: 160px; }
+
+  .stats-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+  .stat { padding: 10px; }
+  .stat-value { font-size: 18px; }
+
+  .form-row { padding: 12px; }
+  .form-row .field { min-width: 100%; }
+
+  .modal { padding: 16px; }
+  .modal.wide { max-width: 100%; }
+  .pairing-code { font-size: 22px; }
+  .qr-steps { font-size: 11px; }
+  .bubble { max-width: 88%; }
+  .voice-note { min-width: 160px; }
+  .rule-form .field.narrow { width: 100%; }
+}
+
+/* Mode font KECIL (tombol A- di sidebar) — untuk layar kecil/limitasi pengguna. */
+html.font-small body { font-size: 13px; }
+html.font-small { font-size: 13px; }
+html.font-small .small { font-size: 11px; }
+html.font-small .mono { font-size: 12px; }
+html.font-small .badge { font-size: 11px; }
+html.font-small code { font-size: 11px; }
+html.font-small h1 { font-size: 19px; }
+html.font-small h2 { font-size: 15px; }
+html.font-small .table th { padding: 8px 12px; }
+html.font-small .table td { padding: 9px 12px; font-size: 12.5px; }
+html.font-small .docs pre { font-size: 11.5px; }
+html.font-small .stat-value { font-size: 19px; }
+@media (max-width: 520px) {
+  html.font-small body { font-size: 12px; }
+  html.font-small .table td { font-size: 12px; }
 }
 
 /* ---------- Tambahan: role, rules, pairing ---------- */
@@ -330,7 +408,8 @@ h2 { font-size: 17px; }
 .rule-form textarea { resize: vertical; }
 .reply-cell { max-width: 380px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .row-off td { opacity: 0.55; }
-code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+.mono { overflow-wrap: anywhere; }
 .pairing { color: var(--text); }
 .pairing-code { font-family: var(--mono); font-size: 32px; font-weight: 700; letter-spacing: 0.12em; margin-top: 6px; }
 
@@ -345,6 +424,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 
 .composer textarea { flex: 1; min-width: 0; }
 .nav-link, .sidebar-foot .btn { white-space: nowrap; }
+.foot-actions { display: flex; gap: 4px; align-items: center; }
 
 /* ---------- Media & voice note ---------- */
 .composer-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
