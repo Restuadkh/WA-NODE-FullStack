@@ -40,6 +40,9 @@ const REPLY_COLUMNS = {
   reply_to_from_me: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 };
 
+// Role super_admin (v2.7). Tabel `users` lama belum punya nilai ENUM ini.
+const USER_ROLE_VALUES = ["super_admin", "admin", "agent"];
+
 function tableNameOf(model) {
   const name = model.getTableName();
   return typeof name === "string" ? name : name.tableName;
@@ -118,6 +121,33 @@ async function ensureMessageTypeEnum({ log = () => {}, dryRun = false } = {}) {
   return { changed: true };
 }
 
+// Tambah nilai ENUM "super_admin" pada kolom role tabel users lama (MySQL/MariaDB).
+async function ensureUserRoleEnum({ log = () => {}, dryRun = false } = {}) {
+  if (sequelize.getDialect() !== "mysql") return { changed: false };
+
+  const { User } = require("../models");
+  const qi = sequelize.getQueryInterface();
+  const table = tableNameOf(User);
+  const [rows] = await sequelize.query(`SHOW COLUMNS FROM ${qi.quoteIdentifier(table)} LIKE 'role'`);
+  const current = String(rows?.[0]?.Type || "");
+  // Kolom non-ENUM (mis. VARCHAR) sudah bisa menyimpan "super_admin" tanpa diubah.
+  if (!current.toLowerCase().startsWith("enum") || current.includes("'super_admin'")) {
+    return { changed: false };
+  }
+
+  if (dryRun) {
+    log(`${table}: [dry-run] akan menambah nilai ENUM "super_admin" pada kolom role`);
+    return { changed: false, pending: true };
+  }
+
+  const values = USER_ROLE_VALUES.map((v) => `'${v}'`).join(", ");
+  await sequelize.query(
+    `ALTER TABLE ${qi.quoteIdentifier(table)} MODIFY COLUMN ${qi.quoteIdentifier("role")} ENUM(${values}) NOT NULL DEFAULT 'agent'`,
+  );
+  log(`${table}: ENUM role diperbarui (menambahkan super_admin)`);
+  return { changed: true };
+}
+
 // `tolerant` dipakai saat start server: kegagalan hanya diperingatkan.
 async function ensureMediaSchema({ log = () => {}, warn = log, dryRun = false, tolerant = false } = {}) {
   const result = { columns: { added: [], existing: [] }, enumChanged: false };
@@ -148,6 +178,7 @@ module.exports = {
   ensureMediaSchema,
   ensureMediaColumns,
   ensureMessageTypeEnum,
+  ensureUserRoleEnum,
   ensureDeviceWebhookSchema,
   ensureDeviceWebhookColumns,
   ensureJobClaimColumns,

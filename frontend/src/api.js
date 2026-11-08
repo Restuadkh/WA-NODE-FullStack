@@ -146,4 +146,12 @@ export const api = {
   createUser: (payload) => request("/api/users", { method: "POST", body: payload }).then(data),
   updateUser: (id, patch) => request(`/api/users/${id}`, { method: "PUT", body: patch }).then(data),
   deleteUser: (id) => request(`/api/users/${id}`, { method: "DELETE" }),
+
+  // --- izin per role (super_admin > admin > agent)
+  // -> { permissions: {key: label}, roles: [...], editable_by_me: [role], matrix: {role: {role, ...perms}} }
+  listRolePermissions: () => request("/api/roles/permissions").then(data),
+  updateRolePermissions: (role, patch) =>
+    request(`/api/roles/permissions/${role}`, { method: "PUT", body: patch }).then(data),
+  // Izin milik user sendiri (dipakai frontend untuk refresh sesi lama).
+  myRolePermissions: () => request("/api/roles/permissions/mine").then(data),
 };

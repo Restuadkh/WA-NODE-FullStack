@@ -3,7 +3,8 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 
 // Halaman Users (khusus admin): kelola akun dashboard & penugasan device (ACL).
-// deviceMode: "all" = semua device (hanya admin), "none" = tidak ada device, "select" = pilih tertentu
+// deviceMode: "all" = semua device (hanya super_admin), "none" = tidak ada device, "select" = pilih tertentu.
+// Admin biasa = hanya device yang dipilih/ditugaskan; super_admin = akses penuh semua device.
 const emptyForm = { name: "", email: "", password: "", role: "agent", device_ids: [], deviceMode: "none" };
 
 export default function Users() {
@@ -35,6 +36,41 @@ export default function Users() {
     load();
   }, []);
 
+  // ---- Matriks izin per role (super_admin > admin > agent; hanya mengatur role di bawahnya)
+  const [permData, setPermData] = useState(null); // { permissions, roles, editable_by_me, matrix }
+  const [permBusy, setPermBusy] = useState("");
+  const [permError, setPermError] = useState("");
+
+  const loadPermissions = async () => {
+    try {
+      setPermData(await api.listRolePermissions());
+      setPermError("");
+    } catch (e) {
+      setPermError(e.message);
+    }
+  };
+
+  useEffect(() => {
+    loadPermissions();
+  }, []);
+
+  // Toggle simpan langsung; backend menolak 403 bila penelepon lebih rendah dari role target.
+  const togglePermission = async (role, key) => {
+    if (!permData) return;
+    const current = permData.matrix[role];
+    setPermBusy(key);
+    setPermError("");
+    try {
+      const updated = await api.updateRolePermissions(role, { [key]: !current[key] });
+      setPermData((d) => ({ ...d, matrix: { ...d.matrix, [role]: updated } }));
+      setNotice(`Izin ${key} untuk role ${role} diperbarui`);
+    } catch (e) {
+      setPermError(e.message);
+    } finally {
+      setPermBusy("");
+    }
+  };
+
   const openNew = () => {
     setForm(emptyForm);
     setEditing("new");
@@ -42,8 +78,10 @@ export default function Users() {
   const openEdit = (user) => {
     // Tentukan deviceMode berdasarkan device_ids dan role
     let deviceMode = "select";
-    if (user.role === "admin" && (!user.device_ids || user.device_ids.length === 0)) {
-      deviceMode = "all"; // admin tanpa device = akses penuh
+    if (user.role === "super_admin") {
+      deviceMode = "all"; // super admin = akses penuh semua device
+    } else if (user.role === "admin" && (!user.device_ids || user.device_ids.length === 0)) {
+      deviceMode = "none"; // admin tanpa penugasan = tidak ada device
     } else if ((!user.device_ids || user.device_ids.length === 0) && user.role === "agent") {
       deviceMode = "none"; // agent tanpa device = tidak ada akses
     } else {
@@ -108,9 +146,9 @@ export default function Users() {
         <div>
           <h1>Pengguna</h1>
           <p className="muted">
-            Kelola akun dashboard. <b>Agent</b> hanya bisa melihat chat dan antrian device yang ditugaskan kepadanya.
-            <b>Admin</b> bisa memilih: <b>Semua device</b> (akses penuh), <b>Tidak ada device</b>, atau <b>Pilih device tertentu</b>.
-            Device bisa dibagikan ke beberapa user (admin/agent).
+            Kelola akun dashboard. <b>Super admin</b> punya akses penuh semua device; <b>Admin</b> hanya device yang
+            ditugaskan/dibuatnya; <b>Agent</b> bisa buka device (QR &amp; status) kecuali tambah/hapus, hanya untuk device
+            yang ditugaskan kepadanya. Device bisa dibagikan ke beberapa user (admin/agent).
           </p>
         </div>
         <button className="btn" onClick={openNew}>
@@ -144,14 +182,22 @@ export default function Users() {
                   </td>
                   <td className="mono">{u.email}</td>
                   <td>
-                    <span className={`badge badge-${u.role === "admin" ? "sent" : "pending"}`}>{u.role}</span>
+                    <span
+                      className={`badge ${
+                        u.role === "super_admin" ? "badge-sent" : u.role === "admin" ? "badge-info" : "badge-pending"
+                      }`}
+                    >
+                      {u.role}
+                    </span>
                   </td>
                   <td className="muted small">
-                    {u.role === "admin" && (!u.device_ids || u.device_ids.length === 0)
-                      ? <span className="badge badge-sent">Semua device</span>
-                      : u.device_ids && u.device_ids.length > 0
-                        ? u.device_ids.map(deviceName).join(", ")
-                        : <span className="badge badge-pending">Tidak ada device</span>}
+                    {u.role === "super_admin" ? (
+                      <span className="badge badge-sent">Semua device</span>
+                    ) : u.device_ids && u.device_ids.length > 0 ? (
+                      u.device_ids.map(deviceName).join(", ")
+                    ) : (
+                      <span className="badge badge-pending">Tidak ada device</span>
+                    )}
                   </td>
                   <td className="right actions">
                     <button className="btn btn-sm" onClick={() => openEdit(u)}>
@@ -227,8 +273,10 @@ export default function Users() {
                 setForm(prev => {
                   // Reset deviceMode saat ganti role
                   let newDeviceMode = prev.deviceMode;
-                  if (newRole === "admin" && prev.deviceMode === "none") {
-                    newDeviceMode = "all"; // admin default ke "all"
+                  if (newRole === "super_admin") {
+                    newDeviceMode = "all"; // super admin selalu akses semua device
+                  } else if (newRole === "admin" && prev.deviceMode === "all") {
+                    newDeviceMode = "select"; // admin biasa pilih device tertentu
                   } else if (newRole === "agent" && prev.deviceMode === "all") {
                     newDeviceMode = "none"; // agent tidak bisa "all", default ke "none"
                   }
@@ -237,6 +285,7 @@ export default function Users() {
               }}>
                 <option value="agent">agent</option>
                 <option value="admin">admin</option>
+                {(me?.role === "super_admin" || form.role === "super_admin") && <option value="super_admin">super_admin</option>}
               </select>
             </label>
 
@@ -249,15 +298,15 @@ export default function Users() {
                     name="deviceMode"
                     checked={form.deviceMode === "all"}
                     onChange={() => {
-                      if (form.role === "admin") {
+                      if (form.role === "super_admin") {
                         setForm({ ...form, deviceMode: "all", device_ids: [] });
                       }
                     }}
-                    disabled={form.role !== "admin"}
+                    disabled={form.role !== "super_admin"}
                   />
                   <span>
                     <strong>Semua device</strong> (akses penuh ke semua device, termasuk device baru di masa depan)
-                    {form.role !== "admin" && <span className="muted small"> — hanya untuk admin</span>}
+                    {form.role !== "super_admin" && <span className="muted small"> — hanya untuk super admin</span>}
                   </span>
                 </label>
                 <label className="check-item radio-item">
@@ -278,10 +327,14 @@ export default function Users() {
                     checked={form.deviceMode === "select"}
                     onChange={() => setForm({ ...form, deviceMode: "select" })}
                   />
-                  <span><strong>Pilih device tertentu</strong> (hanya device yang dicentang di bawah)</span>
+                  <span><strong>Pilih device tertentu</strong> (hanya device yang dicentang di bawah; admin bisa juga buat device sendiri dari halaman Devices)</span>
                 </label>
               </div>
             </div>
+
+            {form.role === "super_admin" && (
+              <p className="muted small">Super admin otomatis punya akses ke semua device.</p>
+            )}
 
             {form.deviceMode === "select" && (
               <div className="field">
@@ -309,6 +362,58 @@ export default function Users() {
           </form>
         </div>
       )}
+      {/* ---- Matriks izin per role (hierarki: super_admin=1 > admin=2 > agent=3) */}
+      <div className="card table-card" style={{ marginTop: 16 }}>
+        <h2 style={{ margin: "0 0 4px" }}>Rule akses per role</h2>
+        <p className="muted small" style={{ marginTop: 0 }}>
+          Hierarki: <b>1. super admin</b> &gt; <b>2. admin</b> &gt; <b>3. agent</b>. Role hanya boleh mengatur rule
+          akses role yang berada di bawahnya (super admin mengatur admin &amp; agent; admin hanya agent). Izin super
+          admin terkunci — selalu akses penuh. Lihat device, QR, dan status selalu tersedia untuk device yang
+          ditugaskan.
+        </p>
+        {permError && <div className="alert alert-error">{permError}</div>}
+        {!permData ? (
+          <div className="empty">Memuat izin…</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Role</th>
+                {Object.entries(permData.permissions).map(([key, label]) => (
+                  <th key={key} className="small">
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(permData.matrix).map(([role, config]) => {
+                const editable = permData.editable_by_me.includes(role);
+                const locked = role === "super_admin";
+                return (
+                  <tr key={role}>
+                    <td>
+                      <span className={`badge ${role === "super_admin" ? "badge-sent" : "badge-info"}`}>{role}</span>
+                      {locked && <div className="muted small">terkunci — akses penuh</div>}
+                    </td>
+                    {Object.keys(permData.permissions).map((key) => (
+                      <td key={key}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(config[key])}
+                          disabled={!editable || permBusy === key}
+                          onChange={() => togglePermission(role, key)}
+                          title={editable ? "" : "Hanya role di atasnya yang bisa mengubah"}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

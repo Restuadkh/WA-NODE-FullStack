@@ -10,7 +10,12 @@ const fmt = (d) => (d ? new Date(d).toLocaleString("id-ID", { dateStyle: "medium
 
 export default function Devices() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  // Aksi mengikuti matriks izin per role (diatur super_admin/admin dari menu Pengguna).
+  // Lihat device + QR + status selalu tersedia untuk device yang ditugaskan.
+  const perm = user?.permissions || {};
+  const canAdd = Boolean(perm.devices_add);
+  const canEdit = Boolean(perm.devices_edit);
+  const canDelete = Boolean(perm.devices_delete);
 
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +96,7 @@ export default function Devices() {
           <h1>Devices</h1>
           <p className="muted">Nomor WhatsApp yang tertaut ke gateway.</p>
         </div>
-        {isAdmin && (
+        {canAdd && (
           <button className="btn btn-primary" onClick={() => setShowForm((v) => !v)}>
             {showForm ? "Batal" : "+ Tambah device"}
           </button>
@@ -146,7 +151,7 @@ export default function Devices() {
           <div className="empty">Memuat…</div>
         ) : devices.length === 0 ? (
           <div className="empty">
-            {isAdmin ? "Belum ada device. Klik “Tambah device” untuk mulai." : "Belum ada device. Minta admin untuk menambahkan."}
+            {canAdd ? "Belum ada device. Klik “Tambah device” untuk mulai." : "Belum ada device. Minta admin untuk menambahkan."}
           </div>
         ) : (
           <table className="table">
@@ -178,12 +183,12 @@ export default function Devices() {
                         Tautkan
                       </button>
                     )}
-                    {isAdmin && (
+                    {canEdit && (
                       <button className="btn btn-sm" onClick={() => setEditDevice(d)}>
                         Edit
                       </button>
                     )}
-                    {isAdmin && (
+                    {canDelete && (
                       <button className="btn btn-sm btn-danger" onClick={() => remove(d)}>
                         Hapus
                       </button>
@@ -196,7 +201,7 @@ export default function Devices() {
         )}
       </div>
 
-      {isAdmin && devices.length > 0 && (
+      {devices.some((d) => d.instance_key) && (
         <p className="muted small">
           <code>key</code> dipakai aplikasi lain untuk mengirim pesan lewat <code>POST /api/message/text?key=…</code>.
           Hanya admin yang dapat melihatnya.

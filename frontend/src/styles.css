@@ -130,6 +130,7 @@ h2 { font-size: 17px; }
 .badge-disconnected, .badge-logged_out { background: var(--err-bg); color: var(--err-text); }
 .badge-pending, .badge-sending { background: var(--warn-bg); color: var(--warn-text); }
 .badge-sent { background: var(--accent-soft); color: var(--accent-strong); }
+.badge-info { background: var(--muted-bg, var(--surface)); color: inherit; }
 .badge-failed, .badge-cancelled { background: var(--err-bg); color: var(--err-text); }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 14px 0 8px; }
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }

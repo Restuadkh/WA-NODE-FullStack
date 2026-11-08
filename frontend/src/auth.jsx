@@ -18,6 +18,20 @@ export function AuthProvider({ children }) {
     setUnauthorizedHandler(logout);
   }, [logout]);
 
+  // Sesi lama (sebelum fitur izin) tidak membawa `permissions` — refresh sekali dari backend.
+  useEffect(() => {
+    if (!user || user.permissions) return;
+    api
+      .myRolePermissions()
+      .then((permissions) => {
+        if (!permissions?.role) return;
+        const next = { ...user, permissions };
+        saveSession(api.getToken(), next);
+        setUser(next);
+      })
+      .catch(() => {});
+  }, [user]);
+
   const login = useCallback(async (email, password) => {
     const res = await api.login(email, password);
     saveSession(res.token, res.user);

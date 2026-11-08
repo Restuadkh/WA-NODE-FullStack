@@ -4,7 +4,9 @@ const { User, Device, DeviceAgent } = require("../models");
 
 const httpError = require("../services/httpError");
 
-const ROLES = ["admin", "agent"];
+const ROLES = ["super_admin", "admin", "agent"];
+// Semua varian admin (super_admin + admin) dihitung sebagai admin untuk proteksi "admin terakhir".
+const ADMIN_ROLES = ["super_admin", "admin"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Daftar user beserta device yang ditugaskan. instance_key tidak ikut.
@@ -43,6 +45,11 @@ async function createUser(req, res) {
   if (!EMAIL_RE.test(email)) throw httpError("Email tidak valid", 400);
   if (password.length < 8) throw httpError("Password minimal 8 karakter", 400);
 
+  // Membuat user bersifat super_admin hanya boleh oleh super_admin.
+  if (role === "super_admin" && req.user?.role !== "super_admin") {
+    throw httpError("Hanya super admin yang boleh membuat super admin", 403);
+  }
+
   const exists = await User.findOne({ where: { email } });
   if (exists) throw httpError("Email sudah dipakai", 409);
 
@@ -64,7 +71,11 @@ async function updateUser(req, res) {
     patch.name = name;
   }
   if (body.role !== undefined) {
-    if (!ROLES.includes(body.role)) throw httpError("role harus admin atau agent", 400);
+    if (!ROLES.includes(body.role)) throw httpError("role harus super_admin, admin, atau agent", 400);
+    // Super admin hanya bisa diatur oleh super_admin.
+    if (req.user?.role !== "super_admin" && body.role !== user.role && (body.role === "super_admin" || user.role === "super_admin")) {
+      throw httpError("Hanya super admin yang boleh mengatur role super admin", 403);
+    }
     patch.role = body.role;
   }
   if (body.password !== undefined) {
@@ -73,8 +84,8 @@ async function updateUser(req, res) {
     if (password) patch.password = await bcrypt.hash(password, 10);
   }
   // Jangan biarkan admin terakhir kehilangan perannya (dashboard terkunci).
-  if (patch.role && user.role === "admin" && patch.role !== "admin") {
-    const admins = await User.count({ where: { role: "admin" } });
+  if (patch.role && ADMIN_ROLES.includes(user.role) && !ADMIN_ROLES.includes(patch.role)) {
+    const admins = await User.count({ where: { role: ADMIN_ROLES } });
     if (admins <= 1) throw httpError("Minimal satu admin harus tersisa", 409);
   }
 
@@ -91,8 +102,8 @@ async function deleteUser(req, res) {
   const user = await User.findByPk(req.params.id);
   if (!user) throw httpError("User tidak ditemukan", 404);
   if (user.id === req.user.id) throw httpError("Tidak bisa menghapus akun sendiri", 409);
-  if (user.role === "admin") {
-    const admins = await User.count({ where: { role: "admin" } });
+  if (ADMIN_ROLES.includes(user.role)) {
+    const admins = await User.count({ where: { role: ADMIN_ROLES } });
     if (admins <= 1) throw httpError("Minimal satu admin harus tersisa", 409);
   }
   await DeviceAgent.destroy({ where: { user_id: user.id } });
@@ -100,8 +111,8 @@ async function deleteUser(req, res) {
   res.json({ error: false, message: "User dihapus" });
 }
 
-// Ganti penugasan device seorang user. Admin tidak perlu penugasan (akses penuh),
-// tapi tetap disimpan agar jika role turun menjadi agent penugasan sudah siap.
+// Ganti penugasan device seorang user. Hanya super_admin yang punya akses penuh;
+// admin & agent mengakses device lewat penugasan ini (masing-masing punya device sendiri).
 async function assignDevices(user, deviceIds) {
   if (!Array.isArray(deviceIds)) throw httpError("device_ids harus berupa array ID device", 400);
   const unique = [...new Set(deviceIds.map(String))];

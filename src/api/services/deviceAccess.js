@@ -1,15 +1,16 @@
 const { DeviceAgent } = require("../models");
 const httpError = require("./httpError");
 
-// ACL device: admin TANPA penugasan = akses penuh (super admin, perilaku lama).
-// Admin DENGAN penugasan dan agent = hanya device yang ditugaskan (tabel device_agents).
+// ACL device: super_admin = akses penuh semua device.
+// Admin dan agent = hanya device yang ditugaskan kepadanya (tabel device_agents),
+// sehingga tiap admin punya device-nya sendiri dan tidak bisa membuka device admin lain.
 // Dipakai route dashboard & socket.io.
 
-// ID device yang boleh diakses user. `null` berarti semua (admin tanpa penugasan).
+// ID device yang boleh diakses user. `null` berarti semua (hanya super_admin).
 async function allowedDeviceIds(user) {
   if (!user) return [];
+  if (user.role === "super_admin") return null; // akses penuh semua device
   const rows = await DeviceAgent.findAll({ where: { user_id: user.id }, attributes: ["device_id"] });
-  if (user.role === "admin" && rows.length === 0) return null; // super admin
   return rows.map((r) => r.device_id);
 }
 

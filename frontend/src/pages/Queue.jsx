@@ -18,7 +18,8 @@ const previewOf = (job) =>
 
 export default function Queue() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  // Batal / ulangi job mengikuti izin jobs_manage per role (super_admin selalu boleh).
+  const canManageJobs = Boolean(user?.permissions?.jobs_manage);
 
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState("");
@@ -210,7 +211,7 @@ export default function Queue() {
                     {job.attempts}/{job.max_attempts}
                   </td>
                   <td className="right actions">
-                    {isAdmin && ["pending", "failed"].includes(job.status) && (
+                    {canManageJobs && ["pending", "failed"].includes(job.status) && (
                       <button
                         className="btn btn-sm btn-danger"
                         disabled={busyId === job.id}
@@ -219,7 +220,7 @@ export default function Queue() {
                         Batalkan
                       </button>
                     )}
-                    {isAdmin && ["failed", "cancelled"].includes(job.status) && (
+                    {canManageJobs && ["failed", "cancelled"].includes(job.status) && (
                       <button className="btn btn-sm" disabled={busyId === job.id} onClick={() => act(job, "retry")}>
                         Ulangi
                       </button>

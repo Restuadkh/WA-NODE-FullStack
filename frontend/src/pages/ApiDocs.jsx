@@ -19,7 +19,7 @@ const Endpoint = ({ method, path, desc, children }) => (
 
 export default function ApiDocs() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const [instanceKey, setInstanceKey] = useState("");
   const [deviceName, setDeviceName] = useState("");
 
@@ -198,6 +198,66 @@ export default function ApiDocs() {
             "from_me": false, "push_name": "Budi", "type": "text",
             "body": "Halo", "media_url": null, "timestamp": 1769499999 } }`}</Code>
         <p className="muted small">Panduan integrasi &amp; verifikasi signature: berkas WebHook.md.</p>
+      </section>
+
+      <section className="card docs-card">
+        <h2>Dashboard API (JWT)</h2>
+        <p className="small">
+          Endpoint untuk dashboard SPA / integrasi internal. Autentikasi memakai token JWT dari login, dikirim lewat
+          header <code className="inline">Authorization: Bearer &lt;TOKEN&gt;</code>.
+        </p>
+        <Code>{`curl -X POST "https://wa.contoh.com/api/auth/login" \\
+  -H "Content-Type: application/json" \\
+  -d '{"email":"admin@contoh.com","password":"rahasia"}'
+
+// response 200
+{ "error": false, "token": "<JWT>",
+  "user": { "id": "...", "name": "Admin", "email": "admin@contoh.com", "role": "super_admin" } }`}</Code>
+        <p className="small">
+          <b>Role &amp; akses:</b> <code className="inline">super_admin</code> = akses penuh semua device;{" "}
+          <code className="inline">admin</code> = hanya device yang dibuat/ditugaskan kepadanya;{" "}
+          <code className="inline">agent</code> = hanya melihat/membuka device yang ditugaskan. Aksi lanjutan (tambah,
+          edit, hapus, redial device; kelola rule; batalkan/ulangi job) mengikuti <b>matriks izin per role</b> yang
+          diatur petingginya dari menu Pengguna — hierarki: <code className="inline">super_admin (1)</code> &gt;{" "}
+          <code className="inline">admin (2)</code> &gt; <code className="inline">agent (3)</code>. Device di luar
+          penugasan dibalas <b>404</b>. Semua wajib JWT kecuali <code className="inline">/api/auth/login</code> dan{" "}
+          <code className="inline">/api/cron/redial</code>.
+        </p>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Endpoint</th>
+              <th>Metode</th>
+              <th>Akses</th>
+              <th>Keterangan</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code className="inline">/api/status</code></td><td>GET</td><td>Publik</td><td>Cek server hidup</td></tr>
+            <tr><td><code className="inline">/api/auth/login</code></td><td>POST</td><td>Publik (rate limit)</td><td>Login, dapat JWT (maks 10 percobaan / 15 menit per IP)</td></tr>
+            <tr><td><code className="inline">/api/devices</code></td><td>GET</td><td>JWT</td><td>Daftar device sesuai penugasan/role</td></tr>
+            <tr><td><code className="inline">/api/devices</code></td><td>POST</td><td>JWT (admin)</td><td>Tambah device — admin yang dibatasi otomatis memiliki device barunya</td></tr>
+            <tr><td><code className="inline">/api/devices/:id</code></td><td>PUT / PATCH</td><td>JWT (admin)</td><td>Ubah nama / webhook device</td></tr>
+            <tr><td><code className="inline">/api/devices/:id/qr</code></td><td>GET</td><td>JWT (admin &amp; agent)</td><td>QR / pairing code untuk menautkan WhatsApp</td></tr>
+            <tr><td><code className="inline">/api/devices/:id/status</code></td><td>GET</td><td>JWT</td><td>Status &amp; nomor device</td></tr>
+            <tr><td><code className="inline">/api/devices/:id/redial</code></td><td>POST</td><td>JWT (admin)</td><td>Redial paksa satu device</td></tr>
+            <tr><td><code className="inline">/api/devices/:id</code></td><td>DELETE</td><td>JWT (admin)</td><td>Logout + hapus device beserta chat, rule, job, media</td></tr>
+            <tr><td><code className="inline">/api/devices/:deviceId/chats</code></td><td>GET</td><td>JWT</td><td>Daftar chat pada device</td></tr>
+            <tr><td><code className="inline">/api/chats/:chatId/messages</code></td><td>GET / POST</td><td>JWT</td><td>Riwayat pesan / kirim pesan dari inbox</td></tr>
+            <tr><td><code className="inline">/api/chats/:chatId/read</code></td><td>POST</td><td>JWT</td><td>Tandai chat dibaca</td></tr>
+            <tr><td><code className="inline">/api/devices/:deviceId/rules</code></td><td>GET / POST</td><td>JWT (list semua; buat admin)</td><td>Rule auto-reply per device</td></tr>
+            <tr><td><code className="inline">/api/rules/:id</code></td><td>PUT / DELETE</td><td>JWT (admin)</td><td>Ubah / hapus rule</td></tr>
+            <tr><td><code className="inline">/api/devices/:deviceId/jobs</code></td><td>GET</td><td>JWT</td><td>Daftar job antrean keluar device (+ <b>/jobs/stats</b>)</td></tr>
+            <tr><td><code className="inline">/api/jobs/:id</code></td><td>DELETE</td><td>JWT (admin)</td><td>Batalkan job antrean</td></tr>
+            <tr><td><code className="inline">/api/jobs/:id/retry</code></td><td>POST</td><td>JWT (admin)</td><td>Jalankan ulang job gagal</td></tr>
+            <tr><td><code className="inline">/api/users</code></td><td>GET / POST</td><td>JWT (admin)</td><td>Daftar / buat user + penugasan device (<code className="inline">device_ids</code>)</td></tr>
+            <tr><td><code className="inline">/api/users/:id</code></td><td>PUT / PATCH / DELETE</td><td>JWT (admin)</td><td>Ubah profil/role/penugasan, hapus user. Hanya super_admin yang boleh mengatur role super_admin</td></tr>
+            <tr><td><code className="inline">/api/roles/permissions</code></td><td>GET</td><td>JWT (admin)</td><td>Matriks izin per role: izin yang tersedia, level hierarki, dan role yang boleh diedit pemanggil</td></tr>
+            <tr><td><code className="inline">/api/roles/permissions/mine</code></td><td>GET</td><td>JWT</td><td>Izin milik user sendiri (role + boolean tiap aksi)</td></tr>
+            <tr><td><code className="inline">/api/roles/permissions/:role</code></td><td>PUT</td><td>JWT (per hierarki)</td><td>Set izin sebuah role, mis. <code className="inline">{`{"devices_edit": true}`}</code>. super_admin mengatur admin &amp; agent; admin hanya agent; izin super_admin terkunci (selalu penuh)</td></tr>
+            <tr><td><code className="inline">/api/cron/redial</code></td><td>GET / POST</td><td>CRON_SECRET</td><td>Redial device yang tidak online via scheduler (<code className="inline">?token=</code>; opsional <code className="inline">?id=</code> atau <code className="inline">?key=</code> untuk satu device)</td></tr>
+          </tbody>
+        </table>
       </section>
 
       <section className="card docs-card">

@@ -13,9 +13,15 @@ const rules = require("../controllers/rules.controller");
 const gateway = require("../controllers/gateway.controller");
 const queue = require("../controllers/queue.controller");
 const users = require("../controllers/users.controller");
+const rolePermissions = require("../controllers/rolePermissions.controller");
+const roleAccess = require("../services/roleAccess");
 
 const router = express.Router();
-const admin = requireRole("admin");
+// Guard "admin" berlaku untuk admin biasa & super_admin.
+const admin = requireRole("admin", "super_admin");
+// Izin per role dikonfigurasi dari menu Pengguna (RolePermission), hierarki:
+// super_admin (1) > admin (2) > agent (3). super_admin selalu punya semua izin.
+const perm = roleAccess.requirePermission;
 
 // Batas ukuran upload media (MB). Naikkan via env MEDIA_MAX_MB bila perlu kirim video besar.
 const MEDIA_MAX_MB = Math.max(1, Number(process.env.MEDIA_MAX_MB) || 50);
@@ -73,15 +79,17 @@ router.use("/message", message);
 router.use(["/devices", "/chats", "/rules", "/jobs", "/users"], authMiddleware);
 
 router.get("/devices", devices.listDevices);
-router.post("/devices", admin, devices.createDevice);
-router.put("/devices/:id", admin, devices.updateDevice);
-router.patch("/devices/:id", admin, devices.updateDevice);
-// QR / pairing code = kunci menautkan nomor WhatsApp, jadi hanya admin
-router.get("/devices/:id/qr", admin, devices.getDeviceQr);
+// Aksi device kini mengikuti izin per role (_rolePermissions: diatur super_admin/admin), bukan "role admin" mentah.
+// Agent bisa: lihat device, buka QR/status. Tambahan (edit/hapus/...) lewat izin yang dikonfigurasi.
+router.post("/devices", perm("devices_add"), devices.createDevice);
+router.put("/devices/:id", perm("devices_edit"), devices.updateDevice);
+router.patch("/devices/:id", perm("devices_edit"), devices.updateDevice);
+// QR / pairing code boleh dibuka admin & agent (untuk menautkan WhatsApp device yang ditugaskan)
+router.get("/devices/:id/qr", devices.getDeviceQr);
 router.get("/devices/:id/status", devices.getDeviceStatus);
-// Redial paksa satu device (admin): putus lalu mulai ulang koneksinya.
-router.post("/devices/:id/redial", admin, devices.redialDevice);
-router.delete("/devices/:id", admin, devices.removeDevice);
+// Redial paksa satu device (izin devices_redial): putus lalu mulai ulang koneksinya.
+router.post("/devices/:id/redial", perm("devices_redial"), devices.redialDevice);
+router.delete("/devices/:id", perm("devices_delete"), devices.removeDevice);
 
 router.get("/devices/:deviceId/chats", chats.listChats);
 router.get("/chats/:chatId/messages", chats.listMessages);
@@ -89,17 +97,23 @@ router.post("/chats/:chatId/messages", chatUpload, chats.sendMessage);
 router.post("/chats/:chatId/read", chats.markRead);
 
 router.get("/devices/:deviceId/rules", rules.listRules);
-router.post("/devices/:deviceId/rules", admin, rules.createRule);
-router.put("/rules/:id", admin, rules.updateRule);
-router.delete("/rules/:id", admin, rules.removeRule);
+router.post("/devices/:deviceId/rules", perm("rules_manage"), rules.createRule);
+router.put("/rules/:id", perm("rules_manage"), rules.updateRule);
+router.delete("/rules/:id", perm("rules_manage"), rules.removeRule);
 
-// Antrean pesan keluar: lihat untuk semua user, ubah hanya admin.
+// Antrean pesan keluar: lihat untuk semua user, ubah mengikuti izin jobs_manage.
 router.get("/devices/:deviceId/jobs", queue.listJobs);
 router.get("/devices/:deviceId/jobs/stats", queue.jobStats);
-router.delete("/jobs/:id", admin, queue.cancelJob);
-router.post("/jobs/:id/retry", admin, queue.retryJob);
+router.delete("/jobs/:id", perm("jobs_manage"), queue.cancelJob);
+router.post("/jobs/:id/retry", perm("jobs_manage"), queue.retryJob);
 
-// ---- Manajemen user (admin): kelola akun dashboard & penugasan device (ACL)
+// ---- Izin per role (hierarki: super_admin > admin > agent, hanya mengatur role di bawahnya)
+router.get("/roles/permissions", admin, rolePermissions.listPermissions);
+router.get("/roles/permissions/mine", rolePermissions.myPermissions);
+router.put("/roles/permissions/:role", admin, rolePermissions.updatePermissions);
+
+// ---- Manajemen user (admin & super_admin): kelola akun dashboard & penugasan device (ACL)
+// Hanya super_admin yang boleh mengangkat seseorang menjadi super_admin (dijaga di controller).
 router.get("/users", admin, users.listUsers);
 router.post("/users", admin, users.createUser);
 router.put("/users/:id", admin, users.updateUser);

@@ -18,7 +18,7 @@ const WEBHOOK_SECRET_MAX = 255;
 function serialize(device, user) {
   const data = device.toJSON();
   data.webhook_configured = !!device.webhook_url;
-  if (user?.role !== "admin") {
+  if (user?.role !== "admin" && user?.role !== "super_admin") {
     delete data.instance_key;
     delete data.webhook_url;
     delete data.webhook_secret;
@@ -99,7 +99,8 @@ async function createDevice(req, res) {
     status: "pending_qr",
     ...webhookPatch(req.body || {}),
   });
-  // Admin yang dibatasi per device otomatis mengelola device yang ia buat.
+  // Admin dengan penugasan device otomatis mengelola device yang ia buat
+  // (super_admin tidak memerlukan penugasan — aksesnya penuh).
   const allowed = await allowedDeviceIds(req.user);
   if (allowed) await DeviceAgent.create({ user_id: req.user.id, device_id: device.id });
   startInBackground(device);

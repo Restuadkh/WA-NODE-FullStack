@@ -31,7 +31,7 @@ export default function App() {
         <Route path="/devices" element={<Devices />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/queue" element={<Queue />} />
-        <Route path="/users" element={user?.role === "admin" ? <Users /> : <Navigate to="/" replace />} />
+        <Route path="/users" element={user?.role === "admin" || user?.role === "super_admin" ? <Users /> : <Navigate to="/" replace />} />
         <Route path="/api-docs" element={<ApiDocs />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

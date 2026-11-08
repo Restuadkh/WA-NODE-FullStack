@@ -2,6 +2,26 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [2.6.0] — 2026-11-08
+
+### 🔒 Keamanan
+
+- **Role `super_admin` baru** — memisahkan admin yang melihat SEMUA device dari admin yang punya device-nya sendiri:
+  - `super_admin` = akses penuh semua device (memindahkan perilaku lama "admin tanpa penugasan").
+  - `admin` = **hanya** device yang ditugaskan/dibuat, meski tanpa penugasan (memperbaiki bug admin tanpa akses device yang masih bisa melihat & membuka semua device).
+  - `agent` = hanya device yang ditugaskan; di halaman Devices bisa buka QR & status, **tidak bisa** tambah/edit/hapus/redial device (`GET /api/devices/:id/qr` dibuka untuk agent).
+  - Hanya `super_admin` yang boleh membuat/mengatur akun `super_admin`.
+- Jalankan `npm run db:upgrade` (atau restart server) untuk menambah nilai ENUM `role: super_admin` pada tabel `users` lama; `seed:admin` kini membuat akun `super_admin`.
+
+### ✨ Fitur
+
+- **Tabel `_RolePermission` — matriks izin per role dengan hierarki** (1 `super_admin` > 2 `admin` > 3 `agent`):
+  - Super admin mengatur rule akses role **admin & agent**; admin hanya role **agent**; izin `super_admin` terkunci (selalu akses penuh).
+  - Aksi yang bisa diatur: tambah/edit/hapus/redial device, kelola rule auto-reply, batalkan/ulangi job antrean.
+  - Ditegakkan di backend via `requirePermission()` (403 bila izin tidak diberikan) dan ditampilkan sebagai tabel checkbox di menu **Pengguna → Rule akses per role**.
+  - Les routes device/rule/jobs kini memakai izin, bukan role "admin" mentah; scope device tetap dibatasi penugasan (`device_agents`).
+- **Halaman Dok API dilengkapi** — tabel "Dashboard API (JWT)" berisi semua endpoint `/api/devices*`, `/api/chats*`, `/api/rules*`, `/api/jobs*`, `/api/users*`, `/api/roles/permissions*`, `/api/cron/redial`, beserta matriks akses per role.
+
 ## [2.5.0] — 2026-10-29
 
 ### 🔒 Keamanan

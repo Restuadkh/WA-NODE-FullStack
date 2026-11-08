@@ -16,10 +16,10 @@ const { User } = require("../api/models");
     await sequelize.sync();
     const [user, created] = await User.findOrCreate({
       where: { email },
-      defaults: { name, password: await bcrypt.hash(password, 10), role: "admin" },
+      defaults: { name, password: await bcrypt.hash(password, 10), role: "super_admin" },
     });
     if (created) {
-      console.log(`Admin dibuat: ${user.email}`);
+      console.log(`Admin dibuat (super admin): ${user.email}`);
       if (generated) console.log(`Password: ${password}  (simpan, tidak ditampilkan lagi)`);
     } else {
       console.log(`User ${email} sudah ada, tidak diubah.`);

@@ -9,7 +9,8 @@ const EMPTY = { keyword: "", match_type: "contains", reply_text: "", priority: 0
 
 export default function Rules() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  // Buat/ubah/hapus rule mengikuti izin rules_manage per role (super_admin selalu boleh).
+  const canManageRules = Boolean(user?.permissions?.rules_manage);
 
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(() => localStorage.getItem(DEVICE_KEY) || "");
@@ -110,7 +111,7 @@ export default function Rules() {
         </select>
       </header>
 
-      {isAdmin && (
+      {canManageRules && (
         <form className="card rule-form" onSubmit={create}>
           <div className="form-row tight">
             <label className="field grow">
@@ -155,7 +156,7 @@ export default function Rules() {
                 <th>Balasan</th>
                 <th>Prioritas</th>
                 <th>Aktif</th>
-                {isAdmin && <th />}
+                {canManageRules && <th />}
               </tr>
             </thead>
             <tbody>
@@ -168,12 +169,12 @@ export default function Rules() {
                   <td className="reply-cell">{r.reply_text}</td>
                   <td>{r.priority}</td>
                   <td>
-                    <label className="switch" title={isAdmin ? "Aktif / nonaktif" : ""}>
-                      <input type="checkbox" checked={r.is_active} disabled={!isAdmin} onChange={() => toggle(r)} />
+                    <label className="switch" title={canManageRules ? "Aktif / nonaktif" : ""}>
+                      <input type="checkbox" checked={r.is_active} disabled={!canManageRules} onChange={() => toggle(r)} />
                       <span />
                     </label>
                   </td>
-                  {isAdmin && (
+                  {canManageRules && (
                     <td className="right">
                       <button className="btn btn-sm btn-danger" onClick={() => remove(r)}>
                         Hapus
