@@ -72,7 +72,7 @@ export default function Users() {
   };
 
   const openNew = () => {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, overrides: {} });
     setEditing("new");
   };
   const openEdit = (user) => {
@@ -87,7 +87,16 @@ export default function Users() {
     } else {
       deviceMode = "select";
     }
-    setForm({ name: user.name, email: user.email, password: "", role: user.role, device_ids: user.device_ids || [], deviceMode });
+    setForm({
+      name: user.name,
+      email: user.email,
+      password: "",
+      role: user.role,
+      device_ids: user.device_ids || [],
+      deviceMode,
+      // Map izin khusus user ini: { devices_add: true|false|null, ... }
+      overrides: { ...(user.permission_overrides || {}) },
+    });
     setEditing(user);
   };
 
@@ -116,6 +125,8 @@ export default function Users() {
       } else {
         if (form.password) payload.password = form.password;
         await api.updateUser(editing.id, payload);
+        // Izin khusus per user: kirim semua kunci yang disetel (null = ikut role kembali).
+        await api.setUserPermissions(editing.id, form.overrides || {});
         setNotice("User diperbarui");
       }
       setEditing(null);
@@ -331,6 +342,46 @@ export default function Users() {
                 </label>
               </div>
             </div>
+
+            {/* ---- Izin khusus user (menimpa rule role) ---- */}
+            {editing !== "new" && form.role !== "super_admin" && (
+              <div className="field">
+                <span>Izin khusus user ini (menimpa rule role)</span>
+                <div className="check-list" style={{ gap: 6 }}>
+                  {permData &&
+                    Object.entries(permData.permissions).map(([key, label]) => {
+                      const roleId = permData.matrix?.[form.role]?.[key];
+                      const value = form.overrides?.[key];
+                      return (
+                        <div key={key} className="perm-row">
+                          <span className="grow small">{label}</span>
+                          <select
+                            className="select select-inline"
+                            value={value === true ? "true" : value === false ? "false" : ""}
+                            disabled={busy}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setForm((f) => ({
+                                ...f,
+                                overrides: { ...f.overrides, [key]: v === "" ? null : v === "true" },
+                              }));
+                            }}
+                          >
+                            <option value="">
+                              Ikuti role ({roleId ? "izinkan" : "tolak"})
+                            </option>
+                            <option value="true">Izinkan</option>
+                            <option value="false">Tolak</option>
+                          </select>
+                        </div>
+                      );
+                    })}
+                </div>
+                <p className="muted small" style={{ margin: 0 }}>
+                  "Ikuti role" berarti izin mengikuti tabel <b>Rule akses per role</b>. Disimpan saat menekan Simpan.
+                </p>
+              </div>
+            )}
 
             {form.role === "super_admin" && (
               <p className="muted small">Super admin otomatis punya akses ke semua device.</p>

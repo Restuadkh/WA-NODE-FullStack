@@ -61,12 +61,31 @@ function cleanRow(row) {
   return { role: row.role, ...Object.fromEntries(Object.keys(PERMISSIONS).map((k) => [k, Boolean(row[k])])) };
 }
 
-// Apakah user boleh melakukan aksi ini? super_admin selalu boleh;
-// role lain mengikuti baris RolePermission (fallback ke default).
+// Resolusi izin untuk SATU user: override user menimpa rule role-nya.
+// -> { role, permissions: {key: bool}, overrides: {key: true|false|null} }
+async function resolveForUser(user) {
+  const role = user?.role || "agent";
+  const base = await getRoleConfig(role);
+  const { UserPermission } = require("../models");
+  const row = role === "super_admin" ? null : await UserPermission.findByPk(user.id);
+  const overrides = {};
+  const permissions = {};
+  for (const key of Object.keys(PERMISSIONS)) {
+    const o = row ? row[key] : null;
+    overrides[key] = o === null || o === undefined ? null : Boolean(o);
+    permissions[key] = overrides[key] !== null ? overrides[key] : base[key];
+  }
+  return { role, permissions, overrides };
+}
+
+// Apakah user boleh melakukan aksi ini? Urutan: super_admin (selalu) > override user > rule role.
 async function can(user, action) {
   if (!user?.role) return false;
   if (user.role === "super_admin") return true;
   if (!(action in PERMISSIONS)) return false;
+  const { UserPermission } = require("../models");
+  const row = await UserPermission.findByPk(user.id);
+  if (row && row[action] !== null && row[action] !== undefined) return Boolean(row[action]);
   const config = await getRoleConfig(user.role);
   return Boolean(config[action]);
 }
@@ -89,4 +108,4 @@ function canManageRole(actorRole, targetRole) {
   return LEVELS[actorRole] < LEVELS[targetRole];
 }
 
-module.exports = { PERMISSIONS, LEVELS, DEFAULTS, defaultsFor, rolesDefaultsRow, getRoleConfig, cleanRow, can, requirePermission, canManageRole };
+module.exports = { PERMISSIONS, LEVELS, DEFAULTS, defaultsFor, rolesDefaultsRow, getRoleConfig, cleanRow, can, resolveForUser, requirePermission, canManageRole };

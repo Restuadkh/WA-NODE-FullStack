@@ -145,6 +145,9 @@ export const api = {
   listUsers: () => request("/api/users").then(data),
   createUser: (payload) => request("/api/users", { method: "POST", body: payload }).then(data),
   updateUser: (id, patch) => request(`/api/users/${id}`, { method: "PUT", body: patch }).then(data),
+  // Izin khusus per user (menimpa rule role). null = kembali ikut role.
+  setUserPermissions: (id, overrides) =>
+    request(`/api/users/${id}/permissions`, { method: "PUT", body: overrides }).then(data),
   deleteUser: (id) => request(`/api/users/${id}`, { method: "DELETE" }),
 
   // --- izin per role (super_admin > admin > agent)

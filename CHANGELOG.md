@@ -24,6 +24,8 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
   - `/api/roles/*` kini dilindungi JWT (sebelumnya tidak masuk daftar path yang dijaga).
   - Admin biasa **tidak bisa** membuat/mengedit/menghapus akun admin (hanya super admin) maupun menetapkan role `admin`/`super_admin`.
   - Admin biasa hanya bisa menugaskan **device miliknya sendiri** saat mengelola user — menutup celah admin yang dibatasi memberi dirinya device admin lain.
+- **Hierarki pembuatan akun (`created_by`)** — tabel `users mendapat kolom `created_by`: admin hanya melihat & mengelola dirinya + agent yang DIA buat; super admin melihat semua.
+- **Izin khusus per user (override)** — tabel `UserPermissions` baru: tiap akun bisa dinilai "Ikuti role / Izinkan / Tolak" per izin (menimpa tabel Rule akses per role). Endpoint `PUT /api/users/:id/permissions`; editor ada di modal Edit Pengguna. İzin dihitung berlapis: override user > rule role > super_admin (selalu penuh).
 - **Halaman Dok API dilengkapi** — tabel "Dashboard API (JWT)" berisi semua endpoint `/api/devices*`, `/api/chats*`, `/api/rules*`, `/api/jobs*`, `/api/users*`, `/api/roles/permissions*`, `/api/cron/redial`, beserta matriks akses per role.
 
 ## [2.5.0] — 2026-10-29

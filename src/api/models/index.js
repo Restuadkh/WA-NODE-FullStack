@@ -7,6 +7,7 @@ const ContactName = require("./ContactName");
 const MessageJob = require("./MessageJob");
 const DeviceAgent = require("./DeviceAgent");
 const RolePermission = require("./RolePermission");
+const UserPermission = require("./UserPermission");
 
 Device.hasMany(Chat, { foreignKey: "device_id", onDelete: "CASCADE" });
 Chat.belongsTo(Device, { foreignKey: "device_id" });
@@ -32,4 +33,10 @@ MessageJob.belongsTo(User, { foreignKey: "created_by_user_id" });
 Device.belongsToMany(User, { through: DeviceAgent, foreignKey: "device_id", otherKey: "user_id" });
 User.belongsToMany(Device, { through: DeviceAgent, foreignKey: "user_id", otherKey: "device_id" });
 
-module.exports = { User, Device, Chat, Message, AutoReplyRule, ContactName, MessageJob, DeviceAgent, RolePermission };
+// Izin khusus per user (menimpa rule role): user dianggap milik satu baris UserPermission.
+User.hasOne(UserPermission, { foreignKey: "user_id", onDelete: "CASCADE" });
+UserPermission.belongsTo(User, { foreignKey: "user_id" });
+
+module.exports = {
+  User, Device, Chat, Message, AutoReplyRule, ContactName, MessageJob, DeviceAgent, RolePermission, UserPermission,
+};

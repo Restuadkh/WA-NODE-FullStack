@@ -118,6 +118,8 @@ router.get("/users", admin, users.listUsers);
 router.post("/users", admin, users.createUser);
 router.put("/users/:id", admin, users.updateUser);
 router.patch("/users/:id", admin, users.updateUser);
+// Izin khusus per user (menimpa rule role; null = ikut role)
+router.put("/users/:id/permissions", admin, users.setUserPermissions);
 router.delete("/users/:id", admin, users.deleteUser);
 
 module.exports = router;

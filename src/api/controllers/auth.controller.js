@@ -25,8 +25,8 @@ async function login(req, res) {
     expiresIn: config.jwt.expiresIn,
   });
 
-  const permissions = await roleAccess.getRoleConfig(user.role);
-  const userData = { id: user.id, name: user.name, email: user.email, role: user.role, permissions };
+  const access = await roleAccess.resolveForUser(user);
+  const userData = { id: user.id, name: user.name, email: user.email, role: user.role, permissions: access.permissions, permission_overrides: access.overrides };
 
   res.json({
     error: false,

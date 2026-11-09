@@ -23,9 +23,9 @@ export function AuthProvider({ children }) {
     if (!user || user.permissions) return;
     api
       .myRolePermissions()
-      .then((permissions) => {
-        if (!permissions?.role) return;
-        const next = { ...user, permissions };
+      .then((access) => {
+        if (!access?.role) return;
+        const next = { ...user, permissions: access.permissions, permission_overrides: access.overrides };
         saveSession(api.getToken(), next);
         setUser(next);
       })

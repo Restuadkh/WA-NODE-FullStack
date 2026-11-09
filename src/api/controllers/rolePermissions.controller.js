@@ -63,8 +63,8 @@ async function updatePermissions(req, res) {
 
 // GET /api/roles/permissions/mine (semua user JWT) — dipakai frontend untuk refresh izin yang tersimpan.
 async function myPermissions(req, res) {
-  const config = await roleAccess.getRoleConfig(req.user.role);
-  res.json({ error: false, data: config });
+  const access = await roleAccess.resolveForUser(req.user);
+  res.json({ error: false, data: access });
 }
 
 module.exports = { listPermissions, updatePermissions, myPermissions };

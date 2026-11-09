@@ -425,6 +425,8 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 .composer textarea { flex: 1; min-width: 0; }
 .nav-link, .sidebar-foot .btn { white-space: nowrap; }
 .foot-actions { display: flex; gap: 4px; align-items: center; }
+.perm-row { display: flex; align-items: center; gap: 10px; }
+.perm-row .select-inline { min-width: 150px; }
 
 /* ---------- Media & voice note ---------- */
 .composer-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }

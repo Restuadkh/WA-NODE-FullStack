@@ -1,9 +1,10 @@
 const bcrypt = require("bcryptjs");
 const { Op } = require("sequelize");
-const { User, Device, DeviceAgent } = require("../models");
+const { User, Device, DeviceAgent, UserPermission } = require("../models");
 
 const httpError = require("../services/httpError");
 const { allowedDeviceIds } = require("../services/deviceAccess");
+const roleAccess = require("../services/roleAccess");
 
 const ROLES = ["super_admin", "admin", "agent"];
 // Semua varian admin (super_admin + admin) dihitung sebagai admin untuk proteksi "admin terakhir".
@@ -26,7 +27,7 @@ function assertCanManage(req, target, action) {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Daftar user beserta device yang ditugaskan. instance_key tidak ikut.
-function serializeUser(user, deviceIds) {
+function serializeUser(user, deviceIds, overrides) {
   return {
     id: user.id,
     name: user.name,
@@ -35,6 +36,8 @@ function serializeUser(user, deviceIds) {
     device_ids: deviceIds || [],
     created_by: user.created_by || null, // admin pembuat (untuk hierarki antar-admin)
     created_at: user.createdAt,
+    // Izin khusus user ini (null = mengikuti rule role). null kalau tidak pernah di-override.
+    permission_overrides: overrides || null,
   };
 }
 
@@ -52,7 +55,21 @@ async function listUsers(req, res) {
     if (!byUser.has(link.user_id)) byUser.set(link.user_id, []);
     byUser.get(link.user_id).push(link.device_id);
   }
-  res.json({ error: false, data: users.map((u) => serializeUser(u, byUser.get(u.id) || [])) });
+  // Override izin per user (untuk editor izin khusus di halaman Pengguna).
+  const refs = await UserPermission.findAll();
+  const byOv = new Map(refs.map((r) => [r.user_id, r]));
+  res.json({
+    error: false,
+    data: users.map((u) => {
+      const row = byOv.get(u.id);
+      const overrides = {};
+      for (const key of Object.keys(roleAccess.PERMISSIONS)) {
+        const v = row ? row[key] : null;
+        overrides[key] = v === null || v === undefined ? null : Boolean(v);
+      }
+      return serializeUser(u, byUser.get(u.id) || [], overrides);
+    }),
+  });
 }
 
 // POST /api/users (admin)  { name, email, password, role, device_ids? }
@@ -181,4 +198,34 @@ async function assignDevices(user, deviceIds, owner) {
   return unique;
 }
 
-module.exports = { listUsers, createUser, updateUser, deleteUser };
+// PUT /api/users/:id/permissions  { devices_add: true|false|null, ... }
+// Izin KHUSUS per user (menimpa rule role). null = hapus override (kembali ikut role).
+// Hierarki tetap: super_admin mengatur siapa pun; admin hanya akun yang ia buat.
+async function setUserPermissions(req, res) {
+  const user = await User.findByPk(req.params.id);
+  if (!user) throw httpError("User tidak ditemukan", 404);
+  assertCanManage(req, user, "mengatur izin");
+  if (user.role === "super_admin") throw httpError("Izin super admin terkunci (selalu akses penuh)", 403);
+
+  const body = req.body || {};
+  const patch = {};
+  let touched = false;
+  for (const key of Object.keys(roleAccess.PERMISSIONS)) {
+    if (body[key] !== undefined) {
+      patch[key] = body[key] === null ? null : Boolean(body[key]);
+      touched = true;
+    }
+  }
+  if (!touched) throw httpError("Tidak ada izin yang dikirim", 400);
+
+  const row = (await UserPermission.findByPk(user.id)) || (await UserPermission.create({ user_id: user.id }));
+  await row.update(patch);
+
+  const access = await roleAccess.resolveForUser(user);
+  res.json({
+    error: false,
+    data: { id: user.id, permissions: access.permissions, permission_overrides: access.overrides },
+  });
+}
+
+module.exports = { listUsers, createUser, updateUser, deleteUser, setUserPermissions };
