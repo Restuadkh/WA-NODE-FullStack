@@ -121,6 +121,7 @@ async function storeMessage({
   body,
   media,
   waMessageId,
+  senderJid,
   status,
   userId,
   isAutoReply,
@@ -159,6 +160,7 @@ async function storeMessage({
     message = await Message.create({
       chat_id: chat.id,
       wa_message_id: waMessageId || null,
+      sender_jid: senderJid || null,
       direction,
       type,
       body,

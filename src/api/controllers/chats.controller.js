@@ -74,25 +74,79 @@ async function listMessages(req, res) {
     ],
     limit,
   });
-  const chat = await Chat.findByPk(req.params.chatId, { attributes: ["device_id"] });
+  const chat = await Chat.findByPk(req.params.chatId, { attributes: ["device_id", "is_group"] });
   if (chat) await assertDeviceAccess(req.user, chat.device_id);
-  res.json({ error: false, data: mediaStore.refreshUrls(rows.reverse()) });
+
+  // Grup: lengkapi identitas pengirim tiap pesan dari tabel numbers
+  // (sender_jid bisa berupa nomor jid atau LID -> petakan ke nama & nomor).
+  let data = mediaStore.refreshUrls(rows.reverse());
+  if (chat?.is_group) {
+    const senders = [...new Set(rows.map((r) => r.sender_jid).filter(Boolean))];
+    const numbers = senders.length
+      ? await ContactName.findAll({
+          where: { device_id: chat.device_id, [Op.or]: [{ from_jid: { [Op.in]: senders } }, { lid_user: { [Op.in]: senders } }] },
+          attributes: ["from_jid", "lid_user", "notify"],
+        })
+      : [];
+    const byJid = new Map();
+    for (const n of numbers) {
+      if (n.from_jid) byJid.set(n.from_jid, n);
+      if (n.lid_user) byJid.set(n.lid_user, n);
+    }
+    data = data.map((r) => {
+      const plain = r.toJSON ? r.toJSON() : r;
+      const n = byJid.get(r.sender_jid);
+      plain.sender_name = n?.notify || null;
+      plain.sender_phone = n?.from_jid ? phoneFromJid(n.from_jid) : (r.sender_jid ? r.sender_jid.split("@")[0] : null);
+      return plain;
+    });
+  }
+
+  res.json({ error: false, data });
 }
 
 // Selesaikan target reply: cari pesan di chat ini berdasarkan wa_message_id.
-// Mengembalikan { key } (untuk Baileys `quoted`) dan { info } (untuk disimpan di riwayat).
+// Mengembalikan { key, quoted, info }:
+//   - key   : key pesan yang dibalas (remoteJid/id/fromMe/participant) — untuk riwayat
+//   - quoted: objek lengkap sesuai tuntutan Baileys ({ key, message }) — diberikan ke
+//             `sendMessage(jid, content, { quoted })`; tanpa `message`, Baileys melempar
+//             TypeError "Cannot read properties of undefined (reading 'fromMe')".
+// Isi kutipannya direkonstruksi dari DB (body/caption), bukan proto asli WhatsApp.
+//   - info  : untuk disimpan di riwayat.
 async function resolveReplyTarget(chat, raw) {
   const waId = typeof raw === "string" ? raw.trim() : "";
   if (!waId) return null;
   const row = await Message.findOne({
     where: { chat_id: chat.id, wa_message_id: waId },
-    attributes: ["wa_message_id", "body", "media_caption", "direction", "type"],
+    attributes: ["wa_message_id", "body", "media_caption", "direction", "type", "sender_jid"],
   });
   if (!row) throw httpError("Pesan yang dibalas tidak ditemukan di chat ini", 400);
   const fromMe = row.direction === "outgoing";
+  // Grup menuntut participant (pengirim pesan yang dibalas) di quoted key:
+  // - balasan ke pesan orang lain -> sender_jid yang tersimpan saat pesan masuk
+  // - balasan ke pesan kita sendiri -> nomor device
+  let participant = null;
+  if (chat.is_group) {
+    participant = !fromMe
+      ? row.sender_jid || chat.wa_jid
+      : chat.Device?.phone_number
+        ? `${phoneFromJid(chat.Device.phone_number)}@s.whatsapp.net`
+        : null;
+  }
+  const quotedKey = {
+    remoteJid: chat.wa_jid,
+    id: row.wa_message_id,
+    fromMe,
+    ...(participant ? { participant } : {}),
+  };
+  const quotedBody = row.media_caption || row.body || "[Media]";
   return {
-    key: { remoteJid: chat.wa_jid, id: row.wa_message_id, fromMe },
-    info: { waId: row.wa_message_id, body: row.media_caption || row.body || "", fromMe },
+    key: quotedKey,
+    quoted: {
+      key: quotedKey,
+      message: { conversation: quotedBody },
+    },
+    info: { waId: row.wa_message_id, body: quotedBody, fromMe },
   };
 }
 
@@ -108,7 +162,7 @@ async function sendMessage(req, res) {
   const caption = typeof req.body?.caption === "string" ? req.body.caption.trim() : text;
   const requestedType = String(req.body?.type || "").toLowerCase();
   const reply = await resolveReplyTarget(chat, req.body?.replyTo);
-  const quoted = reply?.key;
+  const quoted = reply?.quoted;
 
   if (req.file) {
     if (caption.length > MAX_TEXT) throw httpError(`Caption maksimal ${MAX_TEXT} karakter`, 400);

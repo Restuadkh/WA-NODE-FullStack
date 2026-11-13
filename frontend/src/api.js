@@ -139,6 +139,12 @@ export const api = {
   // Pastikan Chat untuk kontak ada, -> { chat_id, device_id } untuk dibuka di Inbox.
   openContact: (deviceId, id) =>
     request(`/api/devices/${deviceId}/contacts/${id}/open`, { method: "POST" }).then(data),
+  // Broadcast lewat antrean anti-ban. Template: {{nama}}, {{nomor}}.
+  broadcastContacts: (deviceId, { text, contact_ids }) =>
+    request(`/api/devices/${deviceId}/contacts/broadcast`, {
+      method: "POST",
+      body: { text, ...(contact_ids ? { contact_ids } : {}) },
+    }).then(data),
 
   // --- auto-reply
   listRules: (deviceId) => request(`/api/devices/${deviceId}/rules`).then(data),

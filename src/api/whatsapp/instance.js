@@ -477,8 +477,8 @@ class WhatsAppInstance extends EventEmitter {
   }
 
   /**
-   * Kirim teks. `opts.quoted`: key pesan yang dibalas (reply/quote) —
-   * bentuknya { remoteJid, id, fromMe, participant? } (key dari Baileys).
+   * Kirim teks. `opts.quoted`: objek pesan yang dibalas (reply/quote) sesuai tuntutan Baileys —
+   * bentuknya { key: { remoteJid, id, fromMe, participant? }, message: { ... } }.
    */
   sendText(jid, text, opts = {}) {
     return this._ensureOnline().sendMessage(jid, { text }, buildSendOpts(opts));

@@ -12,6 +12,9 @@ const Message = sequelize.define(
     id: { type: DataTypes.UUID, defaultValue: orderedUuid, primaryKey: true },
     chat_id: { type: DataTypes.UUID, allowNull: false },
     wa_message_id: { type: DataTypes.STRING, allowNull: true }, // id dari Baileys, untuk dedupe & status
+    // Pengirim asli pesan (msg.key.participant) — hanya terisi untuk grup. Dipakai untuk
+    // menyusun quoted key saat membalas pesan grup (WhatsApp menuntut participant).
+    sender_jid: { type: DataTypes.STRING, allowNull: true },
     direction: { type: DataTypes.ENUM("incoming", "outgoing"), allowNull: false },
     type: {
       type: DataTypes.ENUM("text", "image", "document", "audio", "video", "sticker", "other"),

@@ -1,5 +1,6 @@
 const { Op } = require("sequelize");
-const { ContactName, Chat } = require("../models");
+const { ContactName, Chat, Device } = require("../models");
+const queueService = require("../services/queueService");
 const { assertDeviceAccess } = require("../services/deviceAccess");
 const httpError = require("../services/httpError");
 const { extractContacts, toContactJid } = require("../services/contactImport");
@@ -152,6 +153,53 @@ async function openContact(req, res) {
   res.json({ error: false, data: { chat_id: chat.id, device_id: req.params.deviceId } });
 }
 
+// Broadcast: kirim satu pesan ke banyak kontak sekaligus, lewat ANTREAN (anti-ban) —
+// bukan kirim serentak. Worker mengatur jeda acak, kuota harian, dan jam aktif.
+// Template opsional: {{nama}} -> nama kontak (notify), {{nomor}} -> nomor kontak.
+// Target: semua kontak device, atau subset lewat contact_ids (dipakai frontend dari hasil pencarian).
+async function broadcastContacts(req, res) {
+  await assertDeviceAccess(req.user, req.params.deviceId);
+  const deviceId = req.params.deviceId;
+  const device = await Device.findByPk(deviceId);
+  if (!device) throw httpError("Device tidak ditemukan", 404);
+
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) throw httpError("Isi pesan wajib diisi", 400);
+  if (text.length > 4096) throw httpError("Pesan maksimal 4096 karakter", 400);
+
+  const ids = Array.isArray(req.body?.contact_ids) ? req.body.contact_ids.filter(Boolean) : null;
+  if (ids?.length > 2000) throw httpError("Maksimal 2000 kontak per broadcast", 400);
+
+  const where = { device_id: deviceId, from_jid: { [Op.ne]: null } };
+  if (ids) where.id = { [Op.in]: ids };
+  const rows = await ContactName.findAll({ where, attributes: ["id", "from_jid", "notify"] });
+
+  let queued = 0;
+  let failed = 0;
+  const errors = [];
+  for (const row of rows) {
+    const phone = phoneFromJid(row.from_jid);
+    const message = text
+      .replace(/\{\{\s*nama\s*\}\}/gi, row.notify || "")
+      .replace(/\{\{\s*nomor\s*\}\}/gi, phone);
+    try {
+      await queueService.enqueueText({
+        device,
+        to: row.from_jid,
+        message,
+        source: "broadcast",
+        userId: req.user.id,
+      });
+      queued++;
+    } catch (e) {
+      failed++;
+      errors.push({ phone, message: e.message });
+    }
+  }
+
+  res.json({ error: false, data: { total: rows.length, queued, failed, errors } });
+}
+
 // Hapus satu kontak dari tabel "numbers". Riwayat chat di tabel chats tidak ikut terhapus.
 async function removeContact(req, res) {
   await assertDeviceAccess(req.user, req.params.deviceId);
@@ -161,4 +209,4 @@ async function removeContact(req, res) {
   res.json({ error: false, data: { deleted: req.params.id } });
 }
 
-module.exports = { listContacts, importContacts, openContact, removeContact };
+module.exports = { listContacts, importContacts, openContact, broadcastContacts, removeContact };

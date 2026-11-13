@@ -38,6 +38,8 @@ const REPLY_COLUMNS = {
   reply_to_wa_id: { type: DataTypes.STRING, allowNull: true },
   reply_to_body: { type: DataTypes.TEXT, allowNull: true },
   reply_to_from_me: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Pengirim asli pesan grup (participant) untuk quoted key saat membalas.
+  sender_jid: { type: DataTypes.STRING, allowNull: true },
 };
 
 // Tabel `users` lama: kolom hierarki created_by (siapa admin pembuat akun ini).

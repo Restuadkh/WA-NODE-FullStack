@@ -178,8 +178,8 @@ test("device: hak akses, pembuatan, dan penyembunyian instance_key", async () =>
   assert.ok(instance);
   instance.status = "connected";
   instance.sock = {
-    sendMessage: async (jid, content) => {
-      sent.push({ jid, content });
+    sendMessage: async (jid, content, opts) => {
+      sent.push({ jid, content, opts });
       return { key: { id: `OUT${sent.length}`, remoteJid: jid, fromMe: true } };
     },
     onWhatsApp: async (jid) => [{ jid, exists: !jid.startsWith("628000") }],
@@ -441,6 +441,65 @@ test("balas dari dashboard: sukses, validasi, dan device offline", async () => {
   instance.status = "connected";
 });
 
+test("reply: membalas pesan pribadi & grup menyertakan quoted key yang benar", async () => {
+  // --- chat pribadi: balas pesan masuk pertama dari Budi
+  const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
+  const inc = await Message.findOne({ where: { chat_id: priv.id, direction: "incoming" } });
+  const r1 = await call("POST", `/api/chats/${priv.id}/messages`, { token: agentToken, body: { text: "ok kak", replyTo: inc.wa_message_id } });
+  assert.equal(r1.status, 201);
+  const quoted1 = sent.at(-1).opts?.quoted;
+  assert.ok(quoted1, "quoted dikirim ke Baileys");
+  // Baileys menuntut objek lengkap: { key, message } — bukan key saja.
+  assert.ok(quoted1.message, "quoted menyertakan isi pesan (message)");
+  assert.equal(quoted1.key.remoteJid, priv.wa_jid);
+  assert.equal(quoted1.key.id, inc.wa_message_id);
+  assert.equal(quoted1.key.fromMe, false);
+  // Riwayat menyimpan potongan pesan yang dibalas
+  assert.equal(r1.body.data.reply_to_wa_id, inc.wa_message_id);
+  assert.equal(r1.body.data.reply_to_from_me, false);
+  assert.ok(r1.body.data.reply_to_body);
+
+  // --- balasan ke pesan yang tidak ada di chat ini -> 400
+  const r2 = await call("POST", `/api/chats/${priv.id}/messages`, { token: agentToken, body: { text: "x", replyTo: "TIDAKADA" } });
+  assert.equal(r2.status, 400);
+
+  // --- grup: quoted key harus punya participant pengirim pesan asli
+  const grup = await Chat.findOne({ where: { wa_jid: "12036300@g.us" } });
+  const incG = await Message.findOne({ where: { chat_id: grup.id, direction: "incoming" } });
+  assert.ok(incG.sender_jid, "pesan grup menyimpan participant pengirim");
+  const r3 = await call("POST", `/api/chats/${grup.id}/messages`, { token: agentToken, body: { text: "siap", replyTo: incG.wa_message_id } });
+  assert.equal(r3.status, 201);
+  const quoted3 = sent.at(-1).opts?.quoted;
+  assert.equal(quoted3.key.remoteJid, grup.wa_jid);
+  assert.equal(quoted3.key.participant, incG.sender_jid);
+});
+
+test("broadcast: antrean per kontak dengan template {{nama}}/{{nomor}}", async () => {
+  const { ContactName } = require("../src/api/models");
+  await ContactName.create({ device_id: device.id, from_jid: "6285550001@s.whatsapp.net", lid_user: "999001@lid", notify: "Andi" });
+  await ContactName.create({ device_id: device.id, from_jid: "6285550002@s.whatsapp.net", lid_user: "999002@lid", notify: "Bunga" });
+
+  const res = await call("POST", `/api/devices/${device.id}/contacts/broadcast`, {
+    token: adminToken,
+    body: { text: "Hai {{nama}}, catatan untuk {{nomor}}" },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.total, 2);
+  assert.equal(res.body.data.queued, 2);
+
+  // Worker mengirim sesudahnya (anti-ban), bukan serentak saat request.
+  await drainQueue();
+  const byJid = (jid) => sent.filter((s) => s.jid === jid).at(-1);
+  assert.equal(byJid("6285550001@s.whatsapp.net").content.text, "Hai Andi, catatan untuk 6285550001");
+  assert.equal(byJid("6285550002@s.whatsapp.net").content.text, "Hai Bunga, catatan untuk 6285550002");
+
+  // Validasi: teks kosong ditolak.
+  assert.equal(
+    (await call("POST", `/api/devices/${device.id}/contacts/broadcast`, { token: adminToken, body: { text: "   " } })).status,
+    400,
+  );
+});
+
 test("status pesan keluar naik: sent -> delivered -> read, dan dikirim ke webhook", async () => {
   const received = [];
   const receiver = http.createServer((req, res) => {
@@ -461,7 +520,12 @@ test("status pesan keluar naik: sent -> delivered -> read, dan dikirim ke webhoo
   const previousUrl = device.webhook_url;
   device.webhook_url = url;
   try {
-    const msg = await Message.findOne({ where: { wa_message_id: `OUT${sent.length}` } });
+    // Pesan keluar terakhir di chat pribadi (bukan pesan terakhir global — bisa dari grup).
+    const privChat = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
+    const msg = await Message.findOne({
+      where: { chat_id: privChat.id, direction: "outgoing" },
+      order: [["createdAt", "DESC"]],
+    });
     const key = { id: msg.wa_message_id, fromMe: true };
     await handleStatusUpdates(device, [{ key, update: { status: 4 } }]);
     assert.equal((await msg.reload()).status, "read");
@@ -627,7 +691,8 @@ test("antrean: validasi, boleh enqueue saat device offline, dan worker mengirim"
   assert.equal(batch.status, 201);
   assert.equal(batch.body.data.queued, 2);
   await drainQueue();
-  assert.equal(await MessageJob.count({ where: { status: "sent", device_id: device.id } }), 4);
+  // Broadcast dari test lain menambah job ber-source "broadcast" — hitung hanya job test ini.
+  assert.equal(await MessageJob.count({ where: { status: "sent", device_id: device.id, source: { [require("sequelize").Op.ne]: "broadcast" } } }), 4);
 });
 
 test("antrean media: file disimpan sementara, dikirim, lalu dibersihkan", async () => {

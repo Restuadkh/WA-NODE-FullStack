@@ -87,6 +87,7 @@ async function handleIncoming(device, instance, msg) {
     body: parsed.body,
     media,
     waMessageId: msg.key.id,
+    senderJid: isGroup ? msg.key.participant || null : null,
     status: fromMe ? "sent" : "delivered",
     at: waTimestamp(msg.messageTimestamp),
   });

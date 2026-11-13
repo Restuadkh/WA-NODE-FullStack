@@ -509,6 +509,11 @@ export default function Inbox() {
                 ) : (
                   <div key={row.key} className={`bubble-row ${row.m.direction === "outgoing" ? "out" : "in"}`}>
                     <div className={`bubble ${row.m.is_auto_reply ? "bubble-auto" : ""}`}>
+                      {activeChat.is_group && row.m.direction === "incoming" && (
+                        <div className="sender-line">
+                          {row.m.sender_name || row.m.sender_phone || row.m.sender_jid?.split("@")[0] || "?"}
+                        </div>
+                      )}
                       {row.m.reply_to_body && (
                         <div className={`quoted-box ${row.m.reply_to_from_me ? "quoted-out" : "quoted-in"}`}>
                           <span className="quoted-author">{row.m.reply_to_from_me ? "Anda" : jidLabel(activeChat)}</span>

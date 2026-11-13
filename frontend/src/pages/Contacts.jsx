@@ -18,6 +18,8 @@ export default function Contacts() {
   const [q, setQ] = useState("");
   const [manual, setManual] = useState(EMPTY);
   const [jsonText, setJsonText] = useState("");
+  const [bcText, setBcText] = useState("");
+  const [bcResult, setBcResult] = useState(null);
   const [result, setResult] = useState(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -105,6 +107,25 @@ export default function Contacts() {
       await load();
     } catch (err) {
       setError(err instanceof SyntaxError ? "JSON tidak valid" : err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Broadcast ke kontak yang sedang tampil (ikut filter pencarian) lewat antrean anti-ban.
+  const broadcast = async (e) => {
+    e.preventDefault();
+    const targets = contacts.filter((c) => c.phone);
+    if (!targets.length) return setError("Tidak ada kontak yang bisa dituju");
+    if (!window.confirm(`Kirim broadcast ke ${targets.length} kontak lewat antrean?`)) return;
+    setBusy(true);
+    setError("");
+    setBcResult(null);
+    try {
+      const r = await api.broadcastContacts(deviceId, { text: bcText, contact_ids: targets.map((c) => c.id) });
+      setBcResult(r);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setBusy(false);
     }
@@ -222,6 +243,11 @@ export default function Contacts() {
             </form>
           </details>
 
+          {bcResult && (
+            <div className="alert alert-success small">
+              Broadcast masuk antrean: {bcResult.queued} terjadwal{bcResult.failed > 0 ? ` · ${bcResult.failed} gagal: ${bcResult.errors.slice(0, 3).map((e) => `${e.phone} (${e.message})`).join(", ")}` : ""} — pengiriman mengikuti jeda anti-ban & kuota harian.
+            </div>
+          )}
           {result && (
             <div className="alert alert-success small">
               {result.total} baris diproses · {result.imported} baru · {result.updated} diperbarui
@@ -232,6 +258,29 @@ export default function Contacts() {
       )}
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      {canManage && (
+        <form className="card" onSubmit={broadcast}>
+          <label className="field">
+            <span>Broadcast — pesan ke kontak yang tampil di bawah (tempelan: {"{{nama}}"} dan {"{{nomor}}"})</span>
+            <textarea
+              rows={3}
+              value={bcText}
+              onChange={(e) => setBcText(e.target.value)}
+              maxLength={4096}
+              placeholder={"Halo {{nama}}, ini info dari kami…"}
+              required
+            />
+          </label>
+          <button className="btn btn-primary" disabled={busy || !bcText.trim()}>
+            Kirim broadcast ke {contacts.filter((c) => c.phone).length} kontak
+          </button>
+          <p className="muted small">
+            Terkirim lewat antrean (jeda acak antar pesan, kuota harian, jam aktif) supaya aman dari ban.
+            Gunakan kotak pencarian untuk membatasi target.
+          </p>
+        </form>
+      )}
 
       <div className="card table-card">
         <div className="form-row tight">
