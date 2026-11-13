@@ -19,6 +19,8 @@ const RolePermission = sequelize.define("RolePermission", {
   rules_manage: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   // Batalkan (DELETE /api/jobs/:id) atau retry (POST /api/jobs/:id/retry) job antrean.
   jobs_manage: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Import & kelola kontak per device (CSV/JSON, hapus kontak).
+  contacts_import: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 });
 
 module.exports = RolePermission;

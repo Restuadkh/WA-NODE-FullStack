@@ -16,7 +16,7 @@ require("./api/models");
 const app = require("./app");
 const { initRealtime } = require("./api/services/realtime");
 const { ensureIndexes } = require("./api/services/dbIndexes");
-const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns, ensureUserRoleEnum, ensureUserColumns } = require("./api/services/dbSchema");
+const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns, ensureUserRoleEnum, ensureUserColumns, ensureRolePermissionColumns } = require("./api/services/dbSchema");
 const manager = require("./api/whatsapp/manager");
 const queueService = require("./api/services/queueService");
 
@@ -49,6 +49,12 @@ async function main() {
     // (server tetap jalan); rapikan dengan: npm run db:upgrade
     // Patch kolom created_by pada tabel users lama (hierarki pembuatan akun).
     await ensureUserColumns({
+      tolerant: true,
+      log: (m) => logger.debug(m),
+      warn: (m) => logger.warn(m),
+    });
+    // Patch kolom izin baru pada tabel role_permissions lama (contacts_import).
+    await ensureRolePermissionColumns({
       tolerant: true,
       log: (m) => logger.debug(m),
       warn: (m) => logger.warn(m),

@@ -122,6 +122,24 @@ export const api = {
   },
   markRead: (chatId) => request(`/api/chats/${chatId}/read`, { method: "POST" }).then(data),
 
+  // --- kontak per device
+  listContacts: (deviceId, q = "") =>
+    request(`/api/devices/${deviceId}/contacts${q ? `?q=${encodeURIComponent(q)}` : ""}`).then(data),
+  // form: FormData berisi field "file" (.csv), ATAU body { contacts: [{ phone, name }] }.
+  importContacts: (deviceId, { file, contacts } = {}) => {
+    if (file) {
+      const form = new FormData();
+      form.append("file", file, file.name || "contacts.csv");
+      return request(`/api/devices/${deviceId}/contacts/import`, { method: "POST", form }).then(data);
+    }
+    return request(`/api/devices/${deviceId}/contacts/import`, { method: "POST", body: { contacts } }).then(data);
+  },
+  deleteContact: (deviceId, id) =>
+    request(`/api/devices/${deviceId}/contacts/${id}`, { method: "DELETE" }),
+  // Pastikan Chat untuk kontak ada, -> { chat_id, device_id } untuk dibuka di Inbox.
+  openContact: (deviceId, id) =>
+    request(`/api/devices/${deviceId}/contacts/${id}/open`, { method: "POST" }).then(data),
+
   // --- auto-reply
   listRules: (deviceId) => request(`/api/devices/${deviceId}/rules`).then(data),
   createRule: (deviceId, rule) =>

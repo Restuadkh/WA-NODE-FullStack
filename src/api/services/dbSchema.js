@@ -45,6 +45,11 @@ const USER_HIERARCHY_COLUMNS = {
   created_by: { type: DataTypes.UUID, allowNull: true },
 };
 
+// Izin kontak (v2.8). Tabel `role_permissions` lama belum punya kolom ini.
+const ROLE_PERMISSION_COLUMNS = {
+  contacts_import: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+};
+
 // Role super_admin (v2.7). Tabel `users` lama belum punya nilai ENUM ini.
 const USER_ROLE_VALUES = ["super_admin", "admin", "agent"];
 
@@ -132,6 +137,12 @@ async function ensureUserColumns(options = {}) {
   return ensureColumns(User, USER_HIERARCHY_COLUMNS, options);
 }
 
+// Kolom izin baru pada tabel role_permissions lama.
+async function ensureRolePermissionColumns(options = {}) {
+  const { RolePermission } = require("../models");
+  return ensureColumns(RolePermission, ROLE_PERMISSION_COLUMNS, options);
+}
+
 // Tambah nilai ENUM "super_admin" pada kolom role tabel users lama (MySQL/MariaDB).
 async function ensureUserRoleEnum({ log = () => {}, dryRun = false } = {}) {  if (sequelize.getDialect() !== "mysql") return { changed: false };
 
@@ -190,6 +201,7 @@ module.exports = {
   ensureMessageTypeEnum,
   ensureUserColumns,
   ensureUserRoleEnum,
+  ensureRolePermissionColumns,
   ensureDeviceWebhookSchema,
   ensureDeviceWebhookColumns,
   ensureJobClaimColumns,

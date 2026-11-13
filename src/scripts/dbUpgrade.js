@@ -13,7 +13,7 @@
 const sequelize = require("../config/database");
 require("../api/models");
 const { ensureIndexes } = require("../api/services/dbIndexes");
-const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns, ensureUserRoleEnum, ensureUserColumns } = require("../api/services/dbSchema");
+const { ensureMediaSchema, ensureDeviceWebhookSchema, ensureJobClaimColumns, ensureUserRoleEnum, ensureUserColumns, ensureRolePermissionColumns } = require("../api/services/dbSchema");
 
 async function run({ dryRun = false, log = console.log } = {}) {
   await sequelize.authenticate();
@@ -22,6 +22,7 @@ async function run({ dryRun = false, log = console.log } = {}) {
   await ensureDeviceWebhookSchema({ dryRun, log });
   await ensureJobClaimColumns({ dryRun, log });
   await ensureUserColumns({ dryRun, log });
+  await ensureRolePermissionColumns({ dryRun, log });
   await ensureUserRoleEnum({ dryRun, log });
   await ensureIndexes({ dedupe: true, dryRun, log });
   log(dryRun ? "Dry-run selesai (tidak ada perubahan)." : "Upgrade database selesai.");

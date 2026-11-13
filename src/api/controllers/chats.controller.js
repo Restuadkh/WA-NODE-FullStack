@@ -1,7 +1,8 @@
 const { Op } = require("sequelize");
-const { Chat, Message, Device } = require("../models");
+const { Chat, Message, Device, ContactName } = require("../models");
 const manager = require("../whatsapp/manager");
 const { sendAndStore, PREVIEW } = require("../services/messageService");
+const { phoneFromJid } = require("../whatsapp/jid");
 const mediaStore = require("../services/mediaStore");
 const { assertDeviceAccess } = require("../services/deviceAccess");
 
@@ -27,7 +28,26 @@ async function listChats(req, res) {
     order: [["last_message_at", "DESC"]],
     limit: 500,
   });
-  res.json({ error: false, data: chats });
+  // Chat bisa tersimpan dengan jid LID (2454...@lid). Petakan ke nomor aslinya lewat
+  // tabel numbers (ContactName: lid_user -> from_jid) agar tampil sebagai nomor, bukan LID.
+  const lidJids = chats.map((c) => c.wa_jid).filter((j) => String(j).endsWith("@lid"));
+  const numbers = lidJids.length
+    ? await ContactName.findAll({
+        where: { device_id: req.params.deviceId, lid_user: { [Op.in]: lidJids } },
+        attributes: ["lid_user", "from_jid"],
+      })
+    : [];
+  const phoneByLid = new Map(numbers.map((n) => [n.lid_user, phoneFromJid(n.from_jid)]));
+
+  res.json({
+    error: false,
+    data: chats.map((c) => {
+      const row = c.toJSON();
+      const phone = phoneByLid.get(c.wa_jid) || null;
+      row.phone = phone; // nomor asli bila wa_jid berupa LID, selain itu null
+      return row;
+    }),
+  });
 }
 
 // ACL: chat dicari lewat chatId, jadi akses dicek lewat device pemilik chat.

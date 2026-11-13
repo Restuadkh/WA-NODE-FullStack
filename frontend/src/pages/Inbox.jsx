@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { getSocket } from "../socket";
 
 const DEVICE_KEY = "wa_selected_device";
 
-const jidLabel = (chat) => chat.contact_name || chat.wa_jid.split("@")[0];
-const jidNumber = (chat) => chat.wa_jid.split("@")[0];
+const jidLabel = (chat) => chat.contact_name || chat.phone || chat.wa_jid.split("@")[0];
+const jidNumber = (chat) => chat.phone || chat.wa_jid.split("@")[0];
 const initials = (s) => (s || "?").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 2).toUpperCase() || "?";
 
 function fmtListTime(d) {
@@ -104,6 +104,7 @@ function MediaContent({ m }) {
 }
 
 export default function Inbox() {
+  const [params, setParams] = useSearchParams();
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(() => localStorage.getItem(DEVICE_KEY) || "");
   const [chats, setChats] = useState([]);
@@ -202,23 +203,6 @@ export default function Inbox() {
     clearAttachment();
   }, [deviceId, clearAttachment]);
 
-  // --- daftar chat (+ polling cadangan)
-  const loadChats = useCallback(
-    async (showSpinner) => {
-      if (!deviceId) return;
-      if (showSpinner) setLoadingChats(true);
-      try {
-        setChats(await api.listChats(deviceId));
-        setError("");
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoadingChats(false);
-      }
-    },
-    [deviceId],
-  );
-
   const loadMessages = useCallback(async (chatId) => {
     try {
       const list = await api.listMessages(chatId);
@@ -227,6 +211,35 @@ export default function Inbox() {
       setError(e.message);
     }
   }, []);
+
+  // --- daftar chat (+ polling cadangan)
+  const loadChats = useCallback(
+    async (showSpinner) => {
+      if (!deviceId) return;
+      if (showSpinner) setLoadingChats(true);
+      try {
+        const list = await api.listChats(deviceId);
+        setChats(list);
+        setError("");
+        // Chat yang diminta lewat URL (?chat=<id>, mis. dari halaman Kontak) dibuka otomatis.
+        const target = params.get("chat");
+        if (target) {
+          if (list.some((c) => c.id === target)) {
+            setActiveId(target);
+            setMessages([]);
+            setMobileChatOpen(true);
+            loadMessages(target);
+          }
+          setParams({}, { replace: true }); // bersihkan URL agar refresh tidak membuka ulang
+        }
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoadingChats(false);
+      }
+    },
+    [deviceId, params, setParams, loadMessages],
+  );
 
   useEffect(() => {
     loadChats(true);

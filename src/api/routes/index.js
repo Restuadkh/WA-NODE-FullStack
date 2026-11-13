@@ -14,6 +14,7 @@ const gateway = require("../controllers/gateway.controller");
 const queue = require("../controllers/queue.controller");
 const users = require("../controllers/users.controller");
 const rolePermissions = require("../controllers/rolePermissions.controller");
+const contacts = require("../controllers/contacts.controller");
 const roleAccess = require("../services/roleAccess");
 
 const router = express.Router();
@@ -31,6 +32,7 @@ const uploadOptions = {
 };
 const upload = multer(uploadOptions).single("file");
 const chatUpload = multer(uploadOptions).single("file");
+const csvUpload = multer(uploadOptions).single("file");
 
 router.get("/status", (req, res) => res.json({ status: "ok" }));
 
@@ -95,6 +97,13 @@ router.get("/devices/:deviceId/chats", chats.listChats);
 router.get("/chats/:chatId/messages", chats.listMessages);
 router.post("/chats/:chatId/messages", chatUpload, chats.sendMessage);
 router.post("/chats/:chatId/read", chats.markRead);
+
+// ---- Kontak per device: daftar, import (CSV/JSON), hapus.
+// Izin contacts_import: admin & agent boleh (diatur lewat menu Pengguna → Rule akses per role).
+router.get("/devices/:deviceId/contacts", contacts.listContacts);
+router.post("/devices/:deviceId/contacts/import", perm("contacts_import"), csvUpload, contacts.importContacts);
+router.post("/devices/:deviceId/contacts/:id/open", contacts.openContact);
+router.delete("/devices/:deviceId/contacts/:id", perm("contacts_import"), contacts.removeContact);
 
 router.get("/devices/:deviceId/rules", rules.listRules);
 router.post("/devices/:deviceId/rules", perm("rules_manage"), rules.createRule);

@@ -13,6 +13,7 @@ const PERMISSIONS = {
   devices_redial: "Redial device",
   rules_manage: "Kelola rule auto-reply (buat/ubah/hapus)",
   jobs_manage: "Kelola antrean (batal/retry job)",
+  contacts_import: "Import & kelola kontak (CSV/JSON)",
 };
 
 // Default saat RolePermission belum dikonfigurasi — mengikuti perilaku lama:
@@ -26,6 +27,7 @@ const DEFAULTS = {
     devices_redial: true,
     rules_manage: true,
     jobs_manage: true,
+    contacts_import: true,
   },
   agent: {
     devices_add: false,
@@ -34,6 +36,7 @@ const DEFAULTS = {
     devices_redial: false,
     rules_manage: false,
     jobs_manage: false,
+    contacts_import: true,
   },
 };
 

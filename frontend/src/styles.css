@@ -107,6 +107,9 @@ h2 { font-size: 17px; }
 
 .alert { padding: 9px 12px; border-radius: 9px; font-size: 13px; margin: 10px 0; }
 .alert-error { background: var(--err-bg); color: var(--err-text); }
+.alert-success { background: #e5f6ec; color: #166534; }
+.dark .alert-success { background: #173326; color: #86d9a8; }
+@media (prefers-color-scheme: dark) { .alert-success { background: #173326; color: #86d9a8; } }
 .alert-warn { background: var(--warn-bg); color: var(--warn-text); }
 
 .card {

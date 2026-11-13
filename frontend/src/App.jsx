@@ -7,6 +7,7 @@ import Inbox from "./pages/Inbox";
 import Rules from "./pages/Rules";
 import Queue from "./pages/Queue";
 import Users from "./pages/Users";
+import Contacts from "./pages/Contacts";
 import ApiDocs from "./pages/ApiDocs";
 
 function Protected({ children }) {
@@ -29,6 +30,7 @@ export default function App() {
       >
         <Route path="/" element={<Inbox />} />
         <Route path="/devices" element={<Devices />} />
+        <Route path="/contacts" element={<Contacts />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/queue" element={<Queue />} />
         <Route path="/users" element={user?.role === "admin" || user?.role === "super_admin" ? <Users /> : <Navigate to="/" replace />} />
