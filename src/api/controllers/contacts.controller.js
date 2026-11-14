@@ -4,7 +4,7 @@ const queueService = require("../services/queueService");
 const { assertDeviceAccess } = require("../services/deviceAccess");
 const httpError = require("../services/httpError");
 const { extractContacts, toContactJid } = require("../services/contactImport");
-const { phoneFromJid } = require("../whatsapp/jid");
+const { phoneFromJid, normalizePhoneDigits } = require("../whatsapp/jid");
 
 // Daftar kontak satu device: dibaca dari tabel "numbers" (ContactName) yang menyimpan
 // pasangan nomor (from_jid) <-> LID (lid_user) <-> nama kontak (notify).
@@ -75,8 +75,38 @@ function normalizeLid(lid) {
 async function importContacts(req, res) {
   await assertDeviceAccess(req.user, req.params.deviceId);
   const deviceId = req.params.deviceId;
-  const contacts = extractContacts(req);
-  if (contacts.length > 5000) throw httpError("Maksimal 5000 kontak per import", 400);
+  const parsed = extractContacts(req);
+  // Batas dihitung per NOMOR UNIK (bukan baris mentah) — file VCF dengan beberapa TEL per
+  // kartu bisa menghasilkan baris jauh lebih banyak dari jumlah kontaknya. Duplikat dalam
+  // file yang sama (nomor sama) di-dedupe di sini; yang dipertahankan entri pertama.
+  const unique = new Map();
+  for (const c of parsed) {
+    const phone = String(c.phone ?? "").trim();
+    if (!phone) continue;
+    // Key = digit ternormalisasi: "+62 812-…", "0062 812-…", dan "0812…" dianggap nomor sama.
+    const key = normalizePhoneDigits(phone);
+    if (key && !unique.has(key)) unique.set(key, c);
+  }
+  if (unique.size > 5000) {
+    throw httpError(
+      `Maksimal 5000 nomor unik per import (file berisi ${parsed.length} baris / ${unique.size} nomor unik). Pisahkan menjadi beberapa file.`,
+      400,
+    );
+  }
+  const contacts = [...unique.values()];
+
+  // Muat semua kontak device sekali, key = digit ternormalisasi — supaya nomor sama dengan
+  // format beda ("0812...", "+62812...", "620812..." -> 62812...) terdeteksi SUDAH ADA
+  // lalu di-UPDATE (nama/LID), bukan jadi baris dobel.
+  const existing = await ContactName.findAll({
+    where: { device_id: deviceId },
+    attributes: ["id", "from_jid", "lid_user", "notify"],
+  });
+  const existingByKey = new Map();
+  for (const row of existing) {
+    if (row.from_jid) existingByKey.set(normalizePhoneDigits(row.from_jid), row);
+    if (row.lid_user) existingByKey.set(normalizePhoneDigits(row.lid_user), row);
+  }
 
   let imported = 0;
   let updated = 0;
@@ -91,23 +121,25 @@ async function importContacts(req, res) {
       errors.push({ row: i + 1, phone: c.phone, message: e.message });
       continue;
     }
-    if (seen.has(jid)) continue; // duplikat dalam file yang sama
-    seen.add(jid);
+    const key = normalizePhoneDigits(jid);
+    if (seen.has(key)) continue; // duplikat dalam file yang sama
+    seen.add(key);
 
     const name = String(c.name || "").trim() || null;
     const lid = normalizeLid(c.lid);
     const where = lid
       ? { device_id: deviceId, lid_user: lid }
       : { device_id: deviceId, from_jid: jid };
-    const existing = await ContactName.findOne({ where });
+    const row = existingByKey.get(key) ?? (await ContactName.findOne({ where }));
 
-    if (existing) {
+    if (row) {
       const patch = {};
-      if (name && existing.notify !== name) patch.notify = name;
-      if (existing.from_jid !== jid) patch.from_jid = jid;
-      if (lid && existing.lid_user !== lid) patch.lid_user = lid;
+      if (name && row.notify !== name) patch.notify = name;
+      if (row.from_jid !== jid) patch.from_jid = jid;
+      // LID dari import hanya mengisi yang belum ada; LID lama tidak ditimpa asal-asalan.
+      if (lid && !row.lid_user) patch.lid_user = lid;
       if (Object.keys(patch).length) {
-        await existing.update(patch);
+        await row.update(patch);
         updated++;
       }
     } else {
@@ -124,7 +156,8 @@ async function importContacts(req, res) {
   res.json({
     error: false,
     data: {
-      total: contacts.length,
+      total: contacts.length, // nomor unik setelah dedupe
+      parsed_rows: parsed.length, // baris mentah sebelum dedupe
       imported,
       updated,
       duplicates_skipped: contacts.length - seen.size,

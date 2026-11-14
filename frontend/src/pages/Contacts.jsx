@@ -213,11 +213,11 @@ export default function Contacts() {
           <div className="form-row tight">
             <form onSubmit={importCsv} className="form-row tight grow">
               <label className="field grow">
-                <span>Import file CSV (Excel: simpan sebagai CSV UTF-8)</span>
-                <input ref={fileRef} type="file" accept=".csv,text/csv" />
+                <span>Import file CSV / VCF (Excel: simpan sebagai CSV UTF-8)</span>
+                <input ref={fileRef} type="file" accept=".csv,.vcf,text/csv,text/vcard" />
               </label>
               <button className="btn" disabled={busy} type="submit">
-                Import CSV
+                Import file
               </button>
               <button className="btn btn-ghost" type="button" onClick={downloadTemplate}>
                 Unduh template

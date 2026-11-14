@@ -140,9 +140,22 @@ async function ensureUserColumns(options = {}) {
 }
 
 // Kolom izin baru pada tabel role_permissions lama.
+// Kolom baru dibuat dengan default false; setelah ditambahkan, nilainya disamakan dengan
+// default per role (DEFAULTS di roleAccess) agar perilaku role tidak berubah setelah upgrade.
 async function ensureRolePermissionColumns(options = {}) {
   const { RolePermission } = require("../models");
-  return ensureColumns(RolePermission, ROLE_PERMISSION_COLUMNS, options);
+  const result = await ensureColumns(RolePermission, ROLE_PERMISSION_COLUMNS, options);
+  if (options.dryRun) return result;
+
+  const roleAccess = require("./roleAccess");
+  for (const added of result.added) {
+    for (const [role, defaults] of Object.entries(roleAccess.DEFAULTS)) {
+      if (!defaults || defaults[added] === undefined) continue;
+      await RolePermission.update({ [added]: Boolean(defaults[added]) }, { where: { role } });
+    }
+    options.log?.(`${tableNameOf(RolePermission)}: nilai awal kolom ${added} disamakan dengan default per role`);
+  }
+  return result;
 }
 
 // Tambah nilai ENUM "super_admin" pada kolom role tabel users lama (MySQL/MariaDB).

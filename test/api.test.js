@@ -500,6 +500,127 @@ test("broadcast: antrean per kontak dengan template {{nama}}/{{nomor}}", async (
   );
 });
 
+test("izin: super admin selalu penuh (contacts_import ikut tercentang)", async () => {
+  const roleAccess = require("../src/api/services/roleAccess");
+  const cfg = await roleAccess.getRoleConfig("super_admin");
+  assert.equal(cfg.contacts_import, true);
+  for (const key of Object.keys(roleAccess.PERMISSIONS)) {
+    assert.equal(cfg[key], true, `super_admin.${key} harus true`);
+  }
+  assert.equal(await roleAccess.can({ role: "super_admin" }, "contacts_import"), true);
+
+  // Matriks yang dilihat halaman Pengguna ikut benar (tanpa perlu baris DB super_admin).
+  const { RolePermission } = require("../src/api/models");
+  await RolePermission.destroy({ where: { role: "super_admin" } });
+  const matrix = await roleAccess.getRoleConfig("super_admin");
+  assert.equal(matrix.contacts_import, true, "tetap penuh walau baris DB tidak ada");
+
+  // Admin default boleh import kontak (izin baru mengikuti DEFAULTS).
+  const adminCfg = await roleAccess.getRoleConfig("admin");
+  assert.equal(adminCfg.contacts_import, true);
+});
+
+test("import kontak: file VCF diparse (nama + nomor, satu TEL satu kontak)", async () => {
+  const vcf = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "FN:Budi Santoso",
+    "TEL;TYPE=CELL:+62 812-3456-7890",
+    "END:VCARD",
+    "",
+    "BEGIN:VCARD",
+    "N:Doe;John;;;",
+    "TEL:+6281234567892",
+    "END:VCARD",
+  ].join("\r\n");
+
+  const form = new FormData();
+  form.append("file", new Blob([vcf], { type: "text/vcard" }), "kontak.vcf");
+  const res = await fetch(`${base}/api/devices/${device.id}/contacts/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: form,
+  });
+  assert.equal(res.status, 200);
+  const { data } = await res.json();
+  assert.equal(data.imported, 2);
+  assert.equal(data.errors.length, 0);
+
+  const rows = await require("../src/api/models").ContactName.findAll({ where: { device_id: device.id, notify: ["Budi Santoso", "John Doe"] } });
+  const jids = rows.map((r) => r.from_jid).sort();
+  assert.deepEqual(jids, ["6281234567890@s.whatsapp.net", "6281234567892@s.whatsapp.net"]);
+});
+
+test("import kontak: VCF prefix 00, format beda satu nomor = satu kontak", async () => {
+  // Persis contoh file pengguna: "0062..." dan "006-283-..." dan "+62..."
+  const vcf = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "FN:Okta ap",
+    "N:ap;Okta;;;",
+    "TEL;TYPE=CELL:00628976863201",
+    "END:VCARD",
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "N:RSUDPS;Haryono;Wawan;;",
+    "FN:Haryono Wawan RSUDPS",
+    "TEL;TYPE=CELL:+6283830938867",
+    "END:VCARD",
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "N:RSUDPS;Haryono Wawan;;;",
+    "FN:Haryono Wawan RSUDPS",
+    "TEL;TYPE=CELL:006-283-830938867",
+    "END:VCARD",
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "N:Wawan RSUDPS;Haryono;;;",
+    "FN:Haryono Wawan RSUDPS",
+    "TEL;TYPE=CELL:+6283830938867",
+    "END:VCARD",
+  ].join("\r\n");
+
+  const form = new FormData();
+  form.append("file", new Blob([vcf], { type: "text/vcard" }), "kontak.vcf");
+  const res = await fetch(`${base}/api/devices/${device.id}/contacts/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: form,
+  });
+  const { data } = await res.json();
+  // 4 baris VCF, tapi hanya 2 nomor unik (006-283-830938867 == +6283830938867)
+  assert.equal(data.total, 2);
+  assert.equal(data.parsed_rows, 4);
+  assert.equal(data.imported + data.updated, 2);
+
+  const rows = await require("../src/api/models").ContactName.findAll({
+    where: { device_id: device.id, notify: ["Okta ap", "Haryono Wawan RSUDPS"] },
+  });
+  const jids = rows.map((r) => r.from_jid).sort();
+  // 00628976863201 -> 628976863201 (prefix 00 dibuang, bukan 62062...)
+  assert.deepEqual(jids, ["6283830938867@s.whatsapp.net", "628976863201@s.whatsapp.net"]);
+});
+
+test("import kontak: nomor salah (62 + 0) diperbaiki; import ulang meng-update, bukan dobel", async () => {
+  const { toJid } = require("../src/api/whatsapp/jid");
+  // Entri kontak yang salah simpan: 0 setelah kode negara -> dibuang
+  assert.equal(toJid("+6208934151234"), "628934151234@s.whatsapp.net");
+  assert.equal(toJid("0062812-3456-789"), "628123456789@s.whatsapp.net");
+
+  // Import nomor yang sama (format beda) dalam dua import terpisah -> baris sama di-UPDATE
+  const r1 = await apiImportJson([{ phone: "08112223331", name: "Nama Lama" }]);
+  assert.equal(r1.imported + r1.updated, 1);
+  const r2 = await apiImportJson([{ phone: "628112223331", name: "Nama Baru" }]);
+  assert.equal(r2.updated, 1, "nomor sama (0811... vs 62811...) terdeteksi sudah ada -> update");
+  const row = await require("../src/api/models").ContactName.findOne({ where: { device_id: device.id, from_jid: "628112223331@s.whatsapp.net" } });
+  assert.equal(row.notify, "Nama Baru");
+});
+
+async function apiImportJson(contacts) {
+  const { body } = await call("POST", `/api/devices/${device.id}/contacts/import`, { token: adminToken, body: { contacts } });
+  return body.data;
+}
+
 test("status pesan keluar naik: sent -> delivered -> read, dan dikirim ke webhook", async () => {
   const received = [];
   const receiver = http.createServer((req, res) => {

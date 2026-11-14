@@ -46,8 +46,11 @@ function defaultsFor(role) {
 }
 
 // Baris konfigurasi sebuah role (dibuat dengan nilai default bila belum ada).
+// super_admin SELALU akses penuh — barisnya tidak pernah dibaca dari DB, sehingga
+// kolom izin baru (mis. contacts_import) tidak membuat super admin kehilangan izin.
 async function getRoleConfig(role) {
   if (!LEVELS[role]) throw httpError("Role tidak dikenal", 400);
+  if (role === "super_admin") return defaultsFor(role);
   const [row, created] = await RolePermission.findOrCreate({
     where: { role },
     defaults: rolesDefaultsRow(role),

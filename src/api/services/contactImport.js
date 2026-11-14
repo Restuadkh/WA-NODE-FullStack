@@ -1,6 +1,7 @@
-// Parser daftar kontak dari CSV (dipisah koma/titik-koma/tab) atau JSON.
+// Parser daftar kontak dari CSV (dipisah koma/titik-koma/tab), JSON, atau VCF (vCard).
 // Format CSV fleksibel: dengan/tanpa header, kolom nomor bisa "0812...", "+62...", "62812...".
 //   phone,name  /  nomor,nama  /  wa,nama kontak  /  satu kolom nomor saja
+// VCF: satu kontak per kartu BEGIN:VCARD..END:VCARD; satu TEL = satu kontak.
 // Excel: simpan sebagai "CSV UTF-8" lalu upload file .csv-nya.
 
 const { toJid } = require("../whatsapp/jid");
@@ -81,11 +82,74 @@ function rowsToContacts(rows) {
   return out;
 }
 
-// Terima file upload (CSV) atau array JSON [{ phone, name }] / [["0812..", "Budi"]].
+// Parser vCard (VCF) sederhana: FN/N untuk nama, TEL untuk nomor (satu TEL = satu kontak).
+// Mendukung vCard 2.1/3.0/4.0 yang lazim: param TEL;TYPE=..., escape \, \; \n, dan baris
+// berlanjut (baris dimulai spasi = lanjutan baris sebelumnya). Photo/URL/ADR diabaikan.
+function unescapeVcard(value) {
+  return String(value || "")
+    .replace(/\\n/gi, " ")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\")
+    .trim();
+}
+
+function unfoldVcfLines(text) {
+  const out = [];
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    if ((raw.startsWith(" ") || raw.startsWith("\t")) && out.length) {
+      out[out.length - 1] += raw.slice(1); // baris "folded" (lanjutan)
+    } else out.push(raw);
+  }
+  return out;
+}
+
+function parseVcf(text) {
+  const out = [];
+  let card = null;
+  for (const line of unfoldVcfLines(text)) {
+    const trimmed = line.trim();
+    if (/^BEGIN:VCARD$/i.test(trimmed)) {
+      card = { name: "", tels: [] };
+      continue;
+    }
+    if (!card) continue;
+    if (/^END:VCARD$/i.test(trimmed)) {
+      for (const tel of card.tels) out.push({ phone: tel, name: card.name });
+      card = null;
+      continue;
+    }
+    const sep = trimmed.indexOf(":");
+    if (sep === -1) continue;
+    const prop = trimmed.slice(0, sep).toUpperCase();
+    const value = unescapeVcard(trimmed.slice(sep + 1));
+    if (!value) continue;
+    if (prop === "FN") {
+      card.name = value;
+    } else if (prop === "N") {
+      // N:Doe;John;;; — pakai sebagai nama bila FN tidak ada
+      if (!card.name) card.name = value.split(";").filter(Boolean).reverse().join(" ");
+    } else if (prop.startsWith("TEL")) {
+      // TEL;TYPE=CELL,VOICE:+62812... / TEL:+62812...
+      let tel = value.replace(/[\s()-]/g, "");
+      // Prefix internasional "00..." (mis. 0062812...) -> buang nol depan agar jadi 62812...
+      if (tel.startsWith("00")) tel = tel.replace(/^0+/, "");
+      if (tel && !card.tels.includes(tel)) card.tels.push(tel);
+    }
+  }
+  return out;
+}
+
+// Terima file upload (CSV/VCF) atau array JSON [{ phone, name }] / [["0812..", "Budi"]].
 function extractContacts(req) {
+  const name = `${req.file?.originalname || ""}`;
+  const mime = `${req.file?.mimetype || ""}`.toLowerCase();
   if (req.file) {
-    if (!/\.csv$|text\/csv|text\/plain/i.test(`${req.file.originalname} ${req.file.mimetype}`)) {
-      throw httpError("File harus .csv (Excel: simpan sebagai CSV UTF-8)", 400);
+    if (/\.vcf$|vcard/i.test(`${name} ${mime}`)) {
+      return parseVcf(req.file.buffer.toString("utf8"));
+    }
+    if (!/\.csv$|text\/csv|text\/plain/i.test(`${name} ${mime}`)) {
+      throw httpError("File harus .csv atau .vcf (Excel: simpan sebagai CSV UTF-8)", 400);
     }
     return rowsToContacts(parseCsv(req.file.buffer.toString("utf8")));
   }
@@ -111,4 +175,4 @@ function toContactJid(phone) {
   return toJid(phone);
 }
 
-module.exports = { parseCsv, rowsToContacts, extractContacts, toContactJid };
+module.exports = { parseCsv, rowsToContacts, parseVcf, extractContacts, toContactJid };
