@@ -2,6 +2,19 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [2.8.0] — 2026-11-16
+
+### Ditambah — Kirim Kontak dari Composer
+- **Kirim kartu kontak (vCard)** dari Inbox: tombol 👤 membuka **combobox** berisi kontak dari database — kotak pencarian + **centang banyak kontak sekaligus**, terkirim sebagai SATU pesan berisi daftar kartu kontak (maks 25/pesan).
+- Penerima di WhatsApp bisa tap kartu kontak → chat langsung terbuka, tinggal kirim pesan.
+- Format lama (satu kontak `{ contact }`) tetap didukung; format baru `{ contacts: [...] }` untuk banyak.
+- Nama kosong otomatis memakai nomor; nomor tidak valid ditolak (HTTP 400); riwayat tersimpan sebagai `[Kontak] N kontak: …`.
+- Test uji nomor `0896123345667` → dinormalisasi ke `+62896123345667` otomatis.
+
+### Ditambah — Reply & Edit di Inbox
+- **Pesan masuk berupa reply kini menampilkan kutipan**: handler membaca `contextInfo` (stanzaId, participant, quotedMessage) dari komponen pesan mana pun — kotak kutipan di atas gelembung dengan label "Anda"/nama kontak.
+- **Pesan diedit (WhatsApp "edit")** kini tampil: body diperbarui ke teks terbaru, teks **sebelum edit pertama** tersimpan di kolom baru `edited_from` + `edited_at`, dan penanda kecil **"diedit"** di meta gelembung — hover untuk tooltip, klik untuk membuka teks aslinya. Update realtime lewat `message:update` (chat terbuka berubah tanpa refresh).
+
 ## [2.7.0] — 2026-11-16
 
 ### Ditambah — Manajemen Kontak & Broadcast
