@@ -120,6 +120,7 @@ export default function Inbox() {
   const [attachment, setAttachment] = useState(null); // { file, type, ptt, name, previewUrl }
   const [replyTo, setReplyTo] = useState(null); // pesan yang dibalas (mode reply/quote)
   const [contactForm, setContactForm] = useState(null); // { name, phone } — mode kirim kontak
+  const [contactList, setContactList] = useState([]); // kontak device dari database, untuk dropdown form kontak
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
 
@@ -597,15 +598,32 @@ export default function Inbox() {
 
                 {contactForm && (
                   <div className="attachment-preview contact-form">
+                    {contactList.length > 0 && (
+                      <select
+                        className="select"
+                        value=""
+                        onChange={(e) => {
+                          const c = contactList.find((x) => x.id === e.target.value);
+                          if (c) setContactForm({ name: c.name || "", phone: c.phone || "" });
+                        }}
+                      >
+                        <option value="">— Pilih dari kontak tersimpan —</option>
+                        {contactList.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name ? `${c.name} (${c.phone})` : c.phone}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <input
                       className="input"
-                      placeholder="Nama kontak"
+                      placeholder="Nama kontak (atau pilih di atas)"
                       value={contactForm.name}
                       onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
                     />
                     <input
                       className="input mono"
-                      placeholder="Nomor (mis. 628123456789)"
+                      placeholder="Nomor manual (mis. 628123456789)"
                       value={contactForm.phone}
                       onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
                     />
@@ -647,7 +665,17 @@ export default function Inbox() {
                   <button
                     type="button"
                     className={`btn btn-ghost icon-btn ${contactForm ? "active" : ""}`}
-                    onClick={() => setContactForm(contactForm ? null : { name: "", phone: "" })}
+                    onClick={async () => {
+                      if (contactForm) return setContactForm(null);
+                      setContactForm({ name: "", phone: "" });
+                      // Ambil kontak device dari database untuk dropdown pilihan.
+                      try {
+                        const list = await api.listContacts(deviceId);
+                        setContactList(Array.isArray(list) ? list : []);
+                      } catch {
+                        setContactList([]); // gagal muat tetap bisa isi manual
+                      }
+                    }}
                     disabled={sending || recording}
                     title="Kirim kartu kontak (vCard)"
                   >
