@@ -41,7 +41,7 @@ const { handleIncoming, handleStatusUpdates } = require("../src/api/services/mes
 const { parseContent, parseMedia } = require("../src/api/services/messageService");
 const mediaStore = require("../src/api/services/mediaStore");
 const safeFetch = require("../src/utils/safeFetch");
-const { toJid } = require("../src/api/whatsapp/jid");
+const { toJid, normalizePhoneDigits } = require("../src/api/whatsapp/jid");
 const { matches } = require("../src/api/services/autoReply");
 const queueService = require("../src/api/services/queueService");
 
@@ -501,6 +501,38 @@ test("kirim banyak kontak sekaligus: satu pesan berisi daftar vCard", async () =
     body: { contacts: [{ name: "Rusak", phone: "123" }] },
   });
   assert.equal(bad.status, 400);
+});
+
+test("pesanan masuk berupa reply: info kutipan tersimpan & tampil di Inbox", async () => {
+  const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
+  // Kirim pesan keluar dulu, lalu penerima membalas dengan reply yang mengutip pesan itu.
+  const out = await call("POST", `/api/chats/${priv.id}/messages`, {
+    token: agentToken,
+    body: { text: "pesan yang dikutip" },
+  });
+  const outMsg = out.body.data;
+  const inst = manager.get(device.instance_key);
+  await inst.emit("message", {
+    key: { remoteJid: "628111111111@s.whatsapp.net", fromMe: false, id: "INC_REPLY_QUOTE" },
+    pushName: "Budi",
+    messageTimestamp: Math.floor(Date.now() / 1000),
+    message: {
+      extendedTextMessage: {
+        text: "ini balasan reply",
+        contextInfo: {
+          stanzaId: outMsg.wa_message_id,
+          participant: `${normalizePhoneDigits(device.phone_number)}@s.whatsapp.net`,
+          quotedMessage: { conversation: "pesan yang dikutip" },
+        },
+      },
+    },
+  });
+  await new Promise((r2) => setTimeout(r2, 300));
+  const inc = await Message.findOne({ where: { wa_message_id: "INC_REPLY_QUOTE" } });
+  assert.ok(inc, "pesan reply tersimpan");
+  assert.equal(inc.reply_to_wa_id, outMsg.wa_message_id, "menunjuk pesan yang dikutip");
+  assert.equal(inc.reply_to_body, "pesan yang dikutip");
+  assert.equal(inc.reply_to_from_me, true, "kutipan adalah pesan kita sendiri");
 });
 
 test("reply: membalas pesan pribadi & grup menyertakan quoted key yang benar", async () => {

@@ -7,6 +7,7 @@ const mediaStore = require("./mediaStore");
 const config = require("../../config/config");
 const { parseContent, parseMedia, waTimestamp, findOrCreateChat, storeMessage } = require("./messageService");
 const { getWhatsappJid, getWhatsappLid, getWhatsappName, storeNumberName } = require("./numberService");
+const { normalizePhoneDigits } = require("../whatsapp/jid");
 
 const IGNORED_JID = (jid) =>
   !jid || jid === "status@broadcast" || jid.endsWith("@broadcast") || jid.endsWith("@newsletter");
@@ -46,6 +47,31 @@ async function saveIncomingMedia(device, instance, msg, media) {
     logger.warn({ err: err.message, device: device.id, type: media.kind }, "Gagal mengunduh media masuk");
     return null;
   }
+}
+
+// Reply/quote pada pesan masuk: contextInfo bisa berada di komponen pesan mana pun
+// (extendedTextMessage, imageMessage, dst). Dipakai untuk menampilkan kotak kutipan di Inbox.
+function extractIncomingReply(msg, device) {
+  const parts = Object.values(msg.message || {}).filter(
+    (p) => p && typeof p === "object" && !Array.isArray(p) && p.contextInfo,
+  );
+  const ctx = parts[0]?.contextInfo;
+  if (!ctx?.stanzaId) return null;
+  const qm = ctx.quotedMessage || {};
+  const inner = Object.values(qm).find((v) => v && typeof v === "object") || {};
+  const body =
+    qm.conversation ||
+    inner.text ||
+    inner.caption ||
+    (qm.imageMessage ? "[Gambar]" : qm.videoMessage ? "[Video]" : qm.audioMessage ? "[Audio]" : qm.stickerMessage ? "[Stiker]" : qm.documentMessage ? "[Dokumen]" : "");
+  // participant = pengirim pesan yang dikutip. fromMe jika itu nomor device sendiri.
+  const selfDigits = normalizePhoneDigits(device?.phone_number);
+  const participantDigits = ctx.participant ? normalizePhoneDigits(ctx.participant) : "";
+  return {
+    waId: ctx.stanzaId,
+    body: body || "",
+    fromMe: !!selfDigits && participantDigits === selfDigits,
+  };
 }
 
 // Pesan masuk dari WhatsApp (termasuk yang Anda kirim dari ponsel) -> DB -> dashboard
@@ -91,6 +117,7 @@ async function handleIncoming(device, instance, msg, { fromHistory = false } = {
     isHistory: fromHistory,
     status: fromMe ? "sent" : "delivered",
     at: waTimestamp(msg.messageTimestamp),
+    replyTo: fromMe ? null : extractIncomingReply(msg, device),
   });
   if (!created) return;
 
