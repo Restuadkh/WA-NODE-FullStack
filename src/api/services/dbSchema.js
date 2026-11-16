@@ -42,6 +42,9 @@ const REPLY_COLUMNS = {
   sender_jid: { type: DataTypes.STRING, allowNull: true },
   // Penanda pesan dari history sync (reconnect).
   is_history: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Edit pesan (WhatsApp "edit"): teks sebelum edit pertama + waktu edit terakhir.
+  edited_from: { type: DataTypes.TEXT, allowNull: true },
+  edited_at: { type: DataTypes.DATE, allowNull: true },
 };
 
 // Tabel `users` lama: kolom hierarki created_by (siapa admin pembuat akun ini).

@@ -79,6 +79,33 @@ async function handleIncoming(device, instance, msg, { fromHistory = false } = {
   const jid = msg?.key?.remoteJid;
   if (IGNORED_JID(jid) || !msg.message) return;
 
+  // Edit pesan: WhatsApp mengirim protocolMessage berisi editedMessage + key pesan
+  // lama. Simpan teks lama ke edited_from (sekali, saat edit pertama), perbarui body,
+  // lalu catat edited_at agar UI bisa menampilkan penanda "diedit".
+  const protoEdit = msg.message.protocolMessage;
+  if (protoEdit?.editedMessage) {
+    const editId = protoEdit.key?.id;
+    const inner = protoEdit.editedMessage?.message || protoEdit.editedMessage || {};
+    const parsedEdit = parseContent(inner);
+    if (editId && parsedEdit?.body) {
+      const editChat = await findOrCreateChat(device, jid);
+      const row = await Message.findOne({ where: { chat_id: editChat.id, wa_message_id: editId } });
+      if (row && row.body !== parsedEdit.body) {
+        const patch = { body: parsedEdit.body, edited_at: new Date() };
+        if (row.edited_from == null) patch.edited_from = row.body;
+        if (row.media_caption) patch.media_caption = parsedEdit.body;
+        await row.update(patch);
+        emitToDevice(device.id, "message:update", {
+          chat_id: editChat.id,
+          message_id: row.id,
+          status: row.status,
+          edited: { edited_at: patch.edited_at, edited_from: row.edited_from ?? patch.edited_from },
+        });
+      }
+    }
+    return; // protocol message tidak disimpan sebagai pesan biasa
+  }
+
   const parsed = parseContent(msg.message);
   if (!parsed) return;
 
@@ -92,6 +119,7 @@ async function handleIncoming(device, instance, msg, { fromHistory = false } = {
 
   const fromMe = !!msg.key.fromMe;
   const isGroup = jid.endsWith("@g.us");
+
 
   const chat = await findOrCreateChat(device, jid);
 

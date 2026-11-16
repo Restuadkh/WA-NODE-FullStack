@@ -535,6 +535,52 @@ test("pesanan masuk berupa reply: info kutipan tersimpan & tampil di Inbox", asy
   assert.equal(inc.reply_to_from_me, true, "kutipan adalah pesan kita sendiri");
 });
 
+test("edit pesan: body diperbarui, teks sebelum edit tersimpan", async () => {
+  const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
+  const out = await call("POST", `/api/chats/${priv.id}/messages`, {
+    token: agentToken,
+    body: { text: "teks asli sebelum edit" },
+  });
+  const outMsg = out.body.data;
+  assert.equal(outMsg.body, "teks asli sebelum edit");
+  assert.ok(!outMsg.edited_at, "belum diedit");
+
+  const inst = manager.get(device.instance_key);
+  // WhatsApp mengirim edit sebagai protocolMessage dengan editedMessage + key pesan lama.
+  await inst.emit("message", {
+    key: { remoteJid: "628111111111@s.whatsapp.net", fromMe: false, id: "EDIT_PROTO_1" },
+    pushName: "Budi",
+    messageTimestamp: Math.floor(Date.now() / 1000),
+    message: {
+      protocolMessage: {
+        key: { remoteJid: "628111111111@s.whatsapp.net", fromMe: true, id: outMsg.wa_message_id },
+        type: 3,
+        editedMessage: { conversation: "teks yang sudah diedit" },
+      },
+    },
+  });
+  await new Promise((r2) => setTimeout(r2, 300));
+  const edited = await Message.findOne({ where: { wa_message_id: outMsg.wa_message_id } });
+  assert.equal(edited.body, "teks yang sudah diedit", "body memuat teks terbaru");
+  assert.equal(edited.edited_from, "teks asli sebelum edit", "teks lama tersimpan");
+  assert.ok(edited.edited_at, "edited_at terisi");
+  // Edit kedua: teks lama (pertama) tidak tertimpa.
+  await inst.emit("message", {
+    key: { remoteJid: "628111111111@s.whatsapp.net", fromMe: false, id: "EDIT_PROTO_2" },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+    message: {
+      protocolMessage: {
+        key: { remoteJid: "628111111111@s.whatsapp.net", fromMe: true, id: outMsg.wa_message_id },
+        editedMessage: { conversation: "teks edit kedua" },
+      },
+    },
+  });
+  await new Promise((r2) => setTimeout(r2, 300));
+  await edited.reload();
+  assert.equal(edited.body, "teks edit kedua");
+  assert.equal(edited.edited_from, "teks asli sebelum edit", "edited_from tetap teks asli");
+});
+
 test("reply: membalas pesan pribadi & grup menyertakan quoted key yang benar", async () => {
   // --- chat pribadi: balas pesan masuk pertama dari Budi
   const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });

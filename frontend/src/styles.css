@@ -450,6 +450,12 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
 }
 .contact-option { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; padding: 2px 0; }
 .contact-option:hover { background: var(--surface-3, rgba(0,0,0,.04)); border-radius: 6px; }
+/* Penanda pesan diedit (Inbox) — klik untuk melihat teks sebelum edit. */
+.edited-info { display: inline; }
+.edited-info summary { display: inline; cursor: pointer; list-style: none; color: var(--muted, #888); }
+.edited-info summary::-webkit-details-marker { display: none; }
+.edited-info summary:hover { text-decoration: underline; }
+.edited-info[open] summary::after { content: " ×"; }
 .preview-media { max-height: 120px; max-width: 220px; border-radius: 8px; display: block; }
 .preview-sticker { height: 90px; width: 90px; object-fit: contain; }
 .preview-audio { max-width: 260px; height: 34px; }

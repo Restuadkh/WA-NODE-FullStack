@@ -17,6 +17,9 @@ const Message = sequelize.define(
     sender_jid: { type: DataTypes.STRING, allowNull: true },
     // true = pesan dari history sync saat reconnect (bukan realtime) — ditandai di UI.
     is_history: { type: DataTypes.BOOLEAN, defaultValue: false },
+    // Edit pesan (WhatsApp "edit"): teks sebelum edit pertama + waktu edit terakhir.
+    edited_from: { type: DataTypes.TEXT, allowNull: true },
+    edited_at: { type: DataTypes.DATE, allowNull: true },
     direction: { type: DataTypes.ENUM("incoming", "outgoing"), allowNull: false },
     type: {
       type: DataTypes.ENUM("text", "image", "document", "audio", "video", "sticker", "other"),

@@ -269,8 +269,14 @@ export default function Inbox() {
       }
       loadChats(false); // urutan & unread diambil dari server
     };
-    const onUpdate = ({ message_id, status }) =>
-      setMessages((list) => list.map((m) => (m.id === message_id ? { ...m, status } : m)));
+    const onUpdate = ({ message_id, status, edited }) =>
+      setMessages((list) =>
+        list.map((m) =>
+          m.id === message_id
+            ? { ...m, ...(status ? { status } : {}), ...(edited || {}) }
+            : m,
+        ),
+      );
     const onStatus = ({ device_id, status }) =>
       setDevices((list) => list.map((d) => (d.id === device_id ? { ...d, status } : d)));
 
@@ -548,6 +554,12 @@ export default function Inbox() {
                       <div className="bubble-meta">
                         {row.m.is_auto_reply && <span>auto-reply · </span>}
                         {row.m.is_history && <span className="muted">riwayat · </span>}
+                        {row.m.edited_at && (
+                          <details className="edited-info">
+                            <summary title={`Sebelum di edit: ${row.m.edited_from || "—"}`}>diedit</summary>
+                            <span className="muted small">Sebelum edit: {row.m.edited_from || "—"}</span>
+                          </details>
+                        )}
                         <span>{fmtTime(row.m.created_at || row.m.createdAt)}</span>
                         {row.m.direction === "outgoing" && <Ticks status={row.m.status} />}
                       </div>
