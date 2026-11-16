@@ -119,6 +119,7 @@ export default function Inbox() {
   const [devicesLoaded, setDevicesLoaded] = useState(false);
   const [attachment, setAttachment] = useState(null); // { file, type, ptt, name, previewUrl }
   const [replyTo, setReplyTo] = useState(null); // pesan yang dibalas (mode reply/quote)
+  const [contactForm, setContactForm] = useState(null); // { name, phone } — mode kirim kontak
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
 
@@ -299,6 +300,27 @@ export default function Inbox() {
 
   const send = async (e) => {
     e.preventDefault();
+    // Mode kirim kontak: kirim vCard dari form kontak, abaikan teks/media.
+    if (contactForm) {
+      if (!activeChat || sending) return;
+      setSending(true);
+      setError("");
+      try {
+        const msg = await api.sendContact(
+          activeChat.id,
+          contactForm.name.trim(),
+          contactForm.phone.trim(),
+        );
+        setContactForm(null);
+        if (msg) setMessages((list) => (list.some((m) => m.id === msg.id) ? list : [...list, msg]));
+        loadChats(false);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
     const body = text.trim();
     const file = attachment?.file || null;
     if ((!body && !file) || !activeChat || sending || recording) return;
@@ -524,6 +546,7 @@ export default function Inbox() {
                       {bodyText(row.m) && <div className="bubble-text">{bodyText(row.m)}</div>}
                       <div className="bubble-meta">
                         {row.m.is_auto_reply && <span>auto-reply · </span>}
+                        {row.m.is_history && <span className="muted">riwayat · </span>}
                         <span>{fmtTime(row.m.created_at || row.m.createdAt)}</span>
                         {row.m.direction === "outgoing" && <Ticks status={row.m.status} />}
                       </div>
@@ -572,6 +595,26 @@ export default function Inbox() {
                   </div>
                 )}
 
+                {contactForm && (
+                  <div className="attachment-preview contact-form">
+                    <input
+                      className="input"
+                      placeholder="Nama kontak"
+                      value={contactForm.name}
+                      onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
+                    />
+                    <input
+                      className="input mono"
+                      placeholder="Nomor (mis. 628123456789)"
+                      value={contactForm.phone}
+                      onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
+                    />
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setContactForm(null)} title="Batal kirim kontak">
+                      ✕
+                    </button>
+                  </div>
+                )}
+
                 {recording && (
                   <div className="recording-bar">
                     <span className="rec-dot" /> Merekam {fmtDuration(recordSeconds)}
@@ -600,6 +643,15 @@ export default function Inbox() {
                     title="Lampirkan gambar, video, stiker, audio, atau dokumen"
                   >
                     📎
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-ghost icon-btn ${contactForm ? "active" : ""}`}
+                    onClick={() => setContactForm(contactForm ? null : { name: "", phone: "" })}
+                    disabled={sending || recording}
+                    title="Kirim kartu kontak (vCard)"
+                  >
+                    👤
                   </button>
                   <button
                     type="button"

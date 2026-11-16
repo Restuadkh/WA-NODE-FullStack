@@ -2,6 +2,32 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [2.7.0] — 2026-11-16
+
+### Ditambah — Manajemen Kontak & Broadcast
+- **Halaman Kontak** per device: daftar nomor (nama, nomor, LID, pesan terakhir), tambah manual, hapus, dan tombol "Pesan" untuk membuka chat kontak langsung di Inbox.
+- **Import kontak** dari **CSV, JSON, dan VCF** (kartu nama): dedupe otomatis berdasarkan nomor dinormalisasi (`normalizePhoneDigits` — menangani awalan `00` dan pola `62`+`0`), entri pertama menang; import ulang nomor yang sama memperbarui kontak yang ada.
+- Batas import via env **`CONTACTS_IMPORT_MAX`** (default 5000 nomor unik per file).
+- **Export kontak ke CSV** (BOM UTF-8, langsung rapi di Excel) — endpoint `GET /api/devices/:id/contacts/export` + tombol di halaman Kontak.
+- **Broadcast** ke kontak lewat **antrean anti-ban** (jeda acak, kuota harian, jam aktif) dengan template `{{nama}}` dan `{{nomor}}`; target via checkbox per kontak ("pilih semua" tersedia) — tanpa seleksi berarti semua kontak yang tampil (ikut pencarian).
+- **Broadcast media**: lampiran gambar/video/audio/dokumen dari form broadcast; teks menjadi caption dengan template tetap bekerja.
+- Izin baru **`contacts_import`** (kolom di `role_permissions`, di-backfill sesuai default per role).
+- Kontak disimpan di tabel `numbers` yang sudah ada (kolom `from_jid`, `lid_user`, `notify`) — LID ikut tersimpan saat kontak diimport/open.
+
+### Ditambah — Inbox & Pengiriman
+- **Kirim kartu kontak (vCard)** dari composer Inbox: tombol 👤 membuka form nama + nomor, dikirim sebagai kontak WhatsApp asli (vCard v3.0) dan tersimpan di riwayat sebagai `[Kontak] Nama (+nomor)`.
+- **Reply/quote dari composer**: pesan balasan menyertakan objek `quoted` lengkap yang dituntut Baileys (`{ key: { remoteJid, id, fromMe, participant? }, message }`) — membalas pesan pribadi maupun grup kini berfungsi.
+- **Nama pengirim di grup** ditampilkan di atas gelembung pesan (kolom baru `messages.sender_jid`).
+- **Penanda "riwayat"** untuk pesan yang masuk via history sync saat device offline (kolom baru `messages.is_history`); badge unread tetap naik, pesan lama tidak memundurkan `last_message_at`.
+
+### Ditambah — Mode Senyap (jalan di belakang layar)
+- Env **`SEND_READ_RECEIPTS=false`**: membuka chat di dashboard TIDAK mengirim "terbaca" (centang biru) ke WhatsApp — badge lokal tetap dibersihkan, tapi kontak tidak tahu pesannya dibaca. Berlaku juga di auto-ack pesan masuk. Default `true` (perilaku lama).
+
+### Diperbaiki
+- Daftar chat menampilkan **nomor telepon (phone JID)**, bukan LID, supaya konsisten dan mudah dicari.
+- Broadcast dengan `contact_ids: []` kini berarti "semua kontak" (sebelumnya menghasilkan 0 target).
+- `super_admin` selalu mendapat semua izin tanpa membaca baris DB.
+
 ## [2.6.0] — 2026-11-08
 
 ### 🔒 Keamanan

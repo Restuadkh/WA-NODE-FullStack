@@ -122,6 +122,7 @@ async function storeMessage({
   media,
   waMessageId,
   senderJid,
+  isHistory,
   status,
   userId,
   isAutoReply,
@@ -161,6 +162,7 @@ async function storeMessage({
       chat_id: chat.id,
       wa_message_id: waMessageId || null,
       sender_jid: senderJid || null,
+      is_history: !!isHistory,
       direction,
       type,
       body,
@@ -180,7 +182,13 @@ async function storeMessage({
     throw err;
   }
 
-  const patch = { last_message_at: at || new Date() };
+  // Pesan history bisa berumur lama: jangan mundurkan last_message_at ke waktu lebih tua,
+  // agar urutan daftar chat (DESC) tidak berantakan oleh sync saat reconnect.
+  const atDate = at ? new Date(at) : new Date();
+  const patch = {
+    last_message_at:
+      chat.last_message_at && new Date(chat.last_message_at) > atDate ? chat.last_message_at : atDate,
+  };
   if (direction === "incoming") patch.unread_count = (chat.unread_count || 0) + 1;
   await chat.update(patch);
 

@@ -37,6 +37,10 @@ function create(device) {
   });
 
   instance.on("message", (msg) => handleIncoming(instance.device, instance, msg));
+  // History sync (reconnect): simpan pesan lama/missed tanpa memicu auto-reply & webhook.
+  instance.on("message:history", (messages) => {
+    for (const msg of messages) handleIncoming(instance.device, instance, msg, { fromHistory: true });
+  });
   instance.on("message.update", (updates) => handleStatusUpdates(instance.device, updates));
 
   instances.set(device.instance_key, instance);

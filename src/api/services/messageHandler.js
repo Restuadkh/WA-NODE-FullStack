@@ -49,7 +49,7 @@ async function saveIncomingMedia(device, instance, msg, media) {
 }
 
 // Pesan masuk dari WhatsApp (termasuk yang Anda kirim dari ponsel) -> DB -> dashboard
-async function handleIncoming(device, instance, msg) {
+async function handleIncoming(device, instance, msg, { fromHistory = false } = {}) {
   const jid = msg?.key?.remoteJid;
   if (IGNORED_JID(jid) || !msg.message) return;
 
@@ -88,10 +88,15 @@ async function handleIncoming(device, instance, msg) {
     media,
     waMessageId: msg.key.id,
     senderJid: isGroup ? msg.key.participant || null : null,
+    isHistory: fromHistory,
     status: fromMe ? "sent" : "delivered",
     at: waTimestamp(msg.messageTimestamp),
   });
   if (!created) return;
+
+  // History sync: simpan saja ke DB — tanpa webhook (bisa ratusan pesan lama)
+  // dan tanpa auto-reply (jangan menimpali chat berumur hari).
+  if (fromHistory) return;
 
   notify("messages", device, {
     id: msg.key.id,

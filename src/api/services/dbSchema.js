@@ -40,6 +40,8 @@ const REPLY_COLUMNS = {
   reply_to_from_me: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   // Pengirim asli pesan grup (participant) untuk quoted key saat membalas.
   sender_jid: { type: DataTypes.STRING, allowNull: true },
+  // Penanda pesan dari history sync (reconnect).
+  is_history: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 };
 
 // Tabel `users` lama: kolom hierarki created_by (siapa admin pembuat akun ini).

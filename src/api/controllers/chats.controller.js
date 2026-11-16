@@ -2,11 +2,12 @@ const { Op } = require("sequelize");
 const { Chat, Message, Device, ContactName } = require("../models");
 const manager = require("../whatsapp/manager");
 const { sendAndStore, PREVIEW } = require("../services/messageService");
-const { phoneFromJid } = require("../whatsapp/jid");
+const { phoneFromJid, normalizePhoneDigits } = require("../whatsapp/jid");
 const mediaStore = require("../services/mediaStore");
 const { assertDeviceAccess } = require("../services/deviceAccess");
 
 const httpError = require("../services/httpError");
+const config = require("../../config/config");
 const MAX_TEXT = 4096;
 const MEDIA_TYPES = ["image", "video", "audio", "sticker", "document"];
 
@@ -164,6 +165,35 @@ async function sendMessage(req, res) {
   const reply = await resolveReplyTarget(chat, req.body?.replyTo);
   const quoted = reply?.quoted;
 
+  // Kirim kontak (vCard): body { contact: { name, phone } }.
+  const contact = req.body?.contact;
+  if (contact && typeof contact === "object") {
+    const name = String(contact.name ?? "").trim();
+    const digits = normalizePhoneDigits(contact.phone);
+    if (!digits || digits.length < 8) throw httpError("Nomor kontak tidak valid", 400);
+    const vcard = [
+      "BEGIN:VCARD",
+      "VERSION:3.0",
+      `FN:${name || digits}`,
+      `TEL;TYPE=CELL:+${digits}`,
+      "END:VCARD",
+    ].join("\n");
+
+    const { message, storageFailed } = await sendAndStore({
+      device: chat.Device,
+      instance,
+      to: chat.wa_jid,
+      send: (inst, jid) => inst.sendContact(jid, { displayName: name || digits, vcard }, { quoted }),
+      preview: { type: "other", body: `[Kontak] ${name || digits} (+${digits})` },
+      userId: req.user.id,
+      replyTo: reply?.info,
+    });
+    if (storageFailed) {
+      return res.status(202).json({ error: false, data: null, message: "Pesan terkirim, tetapi gagal disimpan ke riwayat" });
+    }
+    return res.status(201).json({ error: false, data: message });
+  }
+
   if (req.file) {
     if (caption.length > MAX_TEXT) throw httpError(`Caption maksimal ${MAX_TEXT} karakter`, 400);
 
@@ -224,6 +254,10 @@ async function sendMessage(req, res) {
 async function markRead(req, res) {
   const chat = await findChatWithAccess(req.params.chatId, req.user);
   if (chat.unread_count) await chat.update({ unread_count: 0 });
+
+  // Mode senyap (SEND_READ_RECEIPTS=false): jangan kirim "terbaca" ke WhatsApp —
+  // proyek berjalan di belakang layar; badge lokal tetap dibersihkan di atas.
+  if (!config.whatsapp.sendReadReceipts) return res.json({ error: false, data: { unread_count: 0, silent: true } });
 
   // Tandai dibaca juga di WhatsApp agar centang di ponsel ikut berubah.
   try {

@@ -103,7 +103,8 @@ router.post("/chats/:chatId/read", chats.markRead);
 router.get("/devices/:deviceId/contacts", contacts.listContacts);
 router.post("/devices/:deviceId/contacts/import", perm("contacts_import"), csvUpload, contacts.importContacts);
 router.post("/devices/:deviceId/contacts/:id/open", contacts.openContact);
-router.post("/devices/:deviceId/contacts/broadcast", perm("contacts_import"), contacts.broadcastContacts);
+router.post("/devices/:deviceId/contacts/broadcast", perm("contacts_import"), csvUpload, contacts.broadcastContacts);
+router.get("/devices/:deviceId/contacts/export", contacts.exportContacts);
 router.delete("/devices/:deviceId/contacts/:id", perm("contacts_import"), contacts.removeContact);
 
 router.get("/devices/:deviceId/rules", rules.listRules);

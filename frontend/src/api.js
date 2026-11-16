@@ -139,12 +139,25 @@ export const api = {
   // Pastikan Chat untuk kontak ada, -> { chat_id, device_id } untuk dibuka di Inbox.
   openContact: (deviceId, id) =>
     request(`/api/devices/${deviceId}/contacts/${id}/open`, { method: "POST" }).then(data),
-  // Broadcast lewat antrean anti-ban. Template: {{nama}}, {{nomor}}.
-  broadcastContacts: (deviceId, { text, contact_ids }) =>
-    request(`/api/devices/${deviceId}/contacts/broadcast`, {
+  // Kirim kartu kontak (vCard) ke sebuah chat.
+  sendContact: (chatId, name, phone) =>
+    request(`/api/chats/${chatId}/messages`, { method: "POST", body: { contact: { name, phone } } }).then(data),
+  // Broadcast lewat antrean anti-ban. Template: {{nama}}, {{nomor}}. Media: file opsional.
+  broadcastContacts: (deviceId, { text, contact_ids, file } = {}) => {
+    if (file) {
+      const form = new FormData();
+      form.append("file", file, file.name || "media");
+      if (text) form.append("text", text);
+      if (contact_ids?.length) form.append("contact_ids", JSON.stringify(contact_ids));
+      return request(`/api/devices/${deviceId}/contacts/broadcast`, { method: "POST", form }).then(data);
+    }
+    return request(`/api/devices/${deviceId}/contacts/broadcast`, {
       method: "POST",
       body: { text, ...(contact_ids ? { contact_ids } : {}) },
-    }).then(data),
+    }).then(data);
+  },
+  // URL CSV export (butuh token — diunduh manual oleh pemanggil dengan fetch+blob).
+  contactsExportUrl: (deviceId) => `/api/devices/${deviceId}/contacts/export`,
 
   // --- auto-reply
   listRules: (deviceId) => request(`/api/devices/${deviceId}/rules`).then(data),

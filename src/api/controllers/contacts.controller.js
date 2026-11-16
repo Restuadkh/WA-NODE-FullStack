@@ -5,6 +5,11 @@ const { assertDeviceAccess } = require("../services/deviceAccess");
 const httpError = require("../services/httpError");
 const { extractContacts, toContactJid } = require("../services/contactImport");
 const { phoneFromJid, normalizePhoneDigits } = require("../whatsapp/jid");
+const { detectMediaType } = require("./chats.controller");
+const mediaStore = require("../services/mediaStore");
+
+// Batas import nomor unik per file — naikkan via env CONTACTS_IMPORT_MAX.
+const IMPORT_MAX = Math.max(1, Number(process.env.CONTACTS_IMPORT_MAX) || 5000);
 
 // Daftar kontak satu device: dibaca dari tabel "numbers" (ContactName) yang menyimpan
 // pasangan nomor (from_jid) <-> LID (lid_user) <-> nama kontak (notify).
@@ -87,9 +92,9 @@ async function importContacts(req, res) {
     const key = normalizePhoneDigits(phone);
     if (key && !unique.has(key)) unique.set(key, c);
   }
-  if (unique.size > 5000) {
+  if (unique.size > IMPORT_MAX) {
     throw httpError(
-      `Maksimal 5000 nomor unik per import (file berisi ${parsed.length} baris / ${unique.size} nomor unik). Pisahkan menjadi beberapa file.`,
+      `Maksimal ${IMPORT_MAX} nomor unik per import (file berisi ${parsed.length} baris / ${unique.size} nomor unik). Pisahkan menjadi beberapa file atau naikkan CONTACTS_IMPORT_MAX.`,
       400,
     );
   }
@@ -189,6 +194,7 @@ async function openContact(req, res) {
 // Broadcast: kirim satu pesan ke banyak kontak sekaligus, lewat ANTREAN (anti-ban) —
 // bukan kirim serentak. Worker mengatur jeda acak, kuota harian, dan jam aktif.
 // Template opsional: {{nama}} -> nama kontak (notify), {{nomor}} -> nomor kontak.
+// Media: multipart field "file" (gambar/video/audio/dokumen) — teks menjadi caption.
 // Target: semua kontak device, atau subset lewat contact_ids (dipakai frontend dari hasil pencarian).
 async function broadcastContacts(req, res) {
   await assertDeviceAccess(req.user, req.params.deviceId);
@@ -196,15 +202,21 @@ async function broadcastContacts(req, res) {
   const device = await Device.findByPk(deviceId);
   if (!device) throw httpError("Device tidak ditemukan", 404);
 
+  const file = req.file || null;
   const text = String(req.body?.text ?? "").trim();
-  if (!text) throw httpError("Isi pesan wajib diisi", 400);
+  if (!text && !file) throw httpError("Isi pesan atau file wajib diisi", 400);
   if (text.length > 4096) throw httpError("Pesan maksimal 4096 karakter", 400);
+  const mediaType = file ? detectMediaType(file) : null;
 
-  const ids = Array.isArray(req.body?.contact_ids) ? req.body.contact_ids.filter(Boolean) : null;
+  let ids = req.body?.contact_ids;
+  if (typeof ids === "string") {
+    try { ids = JSON.parse(ids); } catch { ids = null; } // multipart mengirim JSON sebagai string
+  }
+  ids = Array.isArray(ids) ? ids.filter(Boolean) : null;
   if (ids?.length > 2000) throw httpError("Maksimal 2000 kontak per broadcast", 400);
 
   const where = { device_id: deviceId, from_jid: { [Op.ne]: null } };
-  if (ids) where.id = { [Op.in]: ids };
+  if (ids?.length) where.id = { [Op.in]: ids }; // array kosong = semua kontak
   const rows = await ContactName.findAll({ where, attributes: ["id", "from_jid", "notify"] });
 
   let queued = 0;
@@ -216,13 +228,27 @@ async function broadcastContacts(req, res) {
       .replace(/\{\{\s*nama\s*\}\}/gi, row.notify || "")
       .replace(/\{\{\s*nomor\s*\}\}/gi, phone);
     try {
-      await queueService.enqueueText({
-        device,
-        to: row.from_jid,
-        message,
-        source: "broadcast",
-        userId: req.user.id,
-      });
+      if (file) {
+        await queueService.enqueueMedia({
+          device,
+          to: row.from_jid,
+          type: mediaType,
+          buffer: file.buffer,
+          mimetype: file.mimetype,
+          filename: file.originalname,
+          caption: message,
+          source: "broadcast",
+          userId: req.user.id,
+        });
+      } else {
+        await queueService.enqueueText({
+          device,
+          to: row.from_jid,
+          message,
+          source: "broadcast",
+          userId: req.user.id,
+        });
+      }
       queued++;
     } catch (e) {
       failed++;
@@ -231,6 +257,25 @@ async function broadcastContacts(req, res) {
   }
 
   res.json({ error: false, data: { total: rows.length, queued, failed, errors } });
+}
+
+// Export kontak device ke CSV (BOM UTF-8 agar Excel langsung benar).
+async function exportContacts(req, res) {
+  await assertDeviceAccess(req.user, req.params.deviceId);
+  const rows = await ContactName.findAll({
+    where: { device_id: req.params.deviceId },
+    attributes: ["from_jid", "lid_user", "notify"],
+    order: [["notify", "ASC"]],
+  });
+  const esc = (v) => (/[",\n]/.test(v ?? "") ? `"${String(v ?? "").replace(/"/g, '""')}"` : String(v ?? ""));
+  const lines = ["phone,name,lid"];
+  for (const r of rows) {
+    if (!r.from_jid) continue;
+    lines.push([phoneFromJid(r.from_jid), esc(r.notify), r.lid_user ? r.lid_user.split("@")[0] : ""].join(","));
+  }
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="kontak-${req.params.deviceId}.csv"`);
+  res.send(`\uFEFF${lines.join("\r\n")}\r\n`);
 }
 
 // Hapus satu kontak dari tabel "numbers". Riwayat chat di tabel chats tidak ikut terhapus.
@@ -242,4 +287,4 @@ async function removeContact(req, res) {
   res.json({ error: false, data: { deleted: req.params.id } });
 }
 
-module.exports = { listContacts, importContacts, openContact, broadcastContacts, removeContact };
+module.exports = { listContacts, importContacts, openContact, broadcastContacts, exportContacts, removeContact };

@@ -50,6 +50,10 @@ module.exports = {
     authDir: process.env.AUTH_DIR || path.join(__dirname, "../auth"),
     restoreOnStartup: bool(process.env.RESTORE_SESSIONS_ON_START_UP, true),
     markMessagesRead: bool(process.env.MARK_MESSAGES_READ),
+    // Mode senyap: false = membuka chat di dashboard TIDAK mengirim "terbaca" (centang biru)
+    // ke WhatsApp — proyek jalan di belakang layar tanpa terlihat membaca. Badge lokal tetap
+    // dibersihkan. Set via env SEND_READ_RECEIPTS=false.
+    sendReadReceipts: bool(process.env.SEND_READ_RECEIPTS, true),
     defaultCountryCode: process.env.DEFAULT_COUNTRY_CODE ?? "62",
     // Penjadwalan koneksi ulang per instance. 0 = percobaan tanpa batas.
     reconnectBaseDelayMs: int(process.env.WA_RECONNECT_BASE_MS, 1000),

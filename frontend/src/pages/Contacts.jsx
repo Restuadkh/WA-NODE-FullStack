@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, API_BASE, getToken } from "../api";
 import { useAuth } from "../auth";
 
 const DEVICE_KEY = "wa_selected_device";
@@ -19,7 +19,9 @@ export default function Contacts() {
   const [manual, setManual] = useState(EMPTY);
   const [jsonText, setJsonText] = useState("");
   const [bcText, setBcText] = useState("");
+  const [bcFile, setBcFile] = useState(null);
   const [bcResult, setBcResult] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
   const [result, setResult] = useState(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -112,22 +114,57 @@ export default function Contacts() {
     }
   };
 
-  // Broadcast ke kontak yang sedang tampil (ikut filter pencarian) lewat antrean anti-ban.
+  // Broadcast ke kontak terpilih (checkbox); tanpa seleksi = semua kontak yang tampil (ikut filter pencarian).
   const broadcast = async (e) => {
     e.preventDefault();
-    const targets = contacts.filter((c) => c.phone);
+    const targets = (selected.size ? contacts.filter((c) => selected.has(c.id)) : contacts).filter((c) => c.phone);
     if (!targets.length) return setError("Tidak ada kontak yang bisa dituju");
     if (!window.confirm(`Kirim broadcast ke ${targets.length} kontak lewat antrean?`)) return;
     setBusy(true);
     setError("");
     setBcResult(null);
     try {
-      const r = await api.broadcastContacts(deviceId, { text: bcText, contact_ids: targets.map((c) => c.id) });
+      const r = await api.broadcastContacts(deviceId, {
+        text: bcText,
+        contact_ids: targets.map((c) => c.id),
+        file: bcFile,
+      });
       setBcResult(r);
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const toggleSelect = (id) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const allVisibleSelected = contacts.length > 0 && contacts.every((c) => selected.has(c.id));
+  const toggleSelectAll = () =>
+    setSelected(allVisibleSelected ? new Set() : new Set(contacts.map((c) => c.id)));
+
+  // Unduh CSV export (endpoint ber-JWT — fetch manual lalu simpan sebagai file).
+  const exportCsv = async () => {
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}${api.contactsExportUrl(deviceId)}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error(`Export gagal (HTTP ${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kontak-${deviceId}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -262,22 +299,29 @@ export default function Contacts() {
       {canManage && (
         <form className="card" onSubmit={broadcast}>
           <label className="field">
-            <span>Broadcast — pesan ke kontak yang tampil di bawah (tempelan: {"{{nama}}"} dan {"{{nomor}}"})</span>
+            <span>Broadcast — teks / caption (tempelan: {"{{nama}}"} dan {"{{nomor}}"})</span>
             <textarea
-              rows={3}
+              rows={2}
               value={bcText}
               onChange={(e) => setBcText(e.target.value)}
               maxLength={4096}
               placeholder={"Halo {{nama}}, ini info dari kami…"}
-              required
             />
           </label>
-          <button className="btn btn-primary" disabled={busy || !bcText.trim()}>
-            Kirim broadcast ke {contacts.filter((c) => c.phone).length} kontak
+          <label className="field">
+            <span>Media (opsional — gambar/video/audio/dokumen; teks di atas menjadi caption)</span>
+            <input
+              type="file"
+              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip"
+              onChange={(e) => setBcFile(e.target.files?.[0] || null)}
+            />
+          </label>
+          <button className="btn btn-primary" disabled={busy || (!bcText.trim() && !bcFile)}>
+            Kirim broadcast ke {selected.size ? `${selected.size} terpilih` : `${contacts.filter((c) => c.phone).length} kontak`}
           </button>
           <p className="muted small">
+            Target: kontak dengan ✓ di tabel bawah; tanpa seleksi = semua yang tampil (ikuti pencarian).
             Terkirim lewat antrean (jeda acak antar pesan, kuota harian, jam aktif) supaya aman dari ban.
-            Gunakan kotak pencarian untuk membatasi target.
           </p>
         </form>
       )}
@@ -288,6 +332,11 @@ export default function Contacts() {
             <span>Cari</span>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari nama atau nomor…" />
           </label>
+          {canManage && (
+            <button className="btn" type="button" onClick={exportCsv} title="Unduh semua kontak device sebagai CSV">
+              Export CSV
+            </button>
+          )}
         </div>
         {contacts.length === 0 ? (
           <div className="empty">Belum ada kontak untuk device ini.</div>
@@ -295,6 +344,11 @@ export default function Contacts() {
           <table className="table">
             <thead>
               <tr>
+                {canManage && (
+                  <th>
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} aria-label="Pilih semua" />
+                  </th>
+                )}
                 <th>Nama</th>
                 <th>Nomor</th>
                 <th>LID</th>
@@ -305,6 +359,11 @@ export default function Contacts() {
             <tbody>
               {contacts.map((c) => (
                 <tr key={c.id}>
+                  {canManage && (
+                    <td>
+                      <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} aria-label={`Pilih ${c.name || c.phone}`} />
+                    </td>
+                  )}
                   <td className="strong">{c.name || <span className="muted">—</span>}</td>
                   <td className="mono">{c.phone}</td>
                   <td className="mono muted small">{c.lid || "—"}</td>

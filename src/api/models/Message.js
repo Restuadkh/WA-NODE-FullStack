@@ -15,6 +15,8 @@ const Message = sequelize.define(
     // Pengirim asli pesan (msg.key.participant) — hanya terisi untuk grup. Dipakai untuk
     // menyusun quoted key saat membalas pesan grup (WhatsApp menuntut participant).
     sender_jid: { type: DataTypes.STRING, allowNull: true },
+    // true = pesan dari history sync saat reconnect (bukan realtime) — ditandai di UI.
+    is_history: { type: DataTypes.BOOLEAN, defaultValue: false },
     direction: { type: DataTypes.ENUM("incoming", "outgoing"), allowNull: false },
     type: {
       type: DataTypes.ENUM("text", "image", "document", "audio", "video", "sticker", "other"),

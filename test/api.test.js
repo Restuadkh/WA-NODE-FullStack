@@ -441,6 +441,21 @@ test("balas dari dashboard: sukses, validasi, dan device offline", async () => {
   instance.status = "connected";
 });
 
+test("kirim kontak: vCard terkirim & tersimpan sebagai pesan [Kontak]", async () => {
+  const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
+  const r = await call("POST", `/api/chats/${priv.id}/messages`, {
+    token: agentToken,
+    body: { contact: { name: "Budi Santoso", phone: "628123456789" } },
+  });
+  assert.equal(r.status, 201);
+  assert.match(r.body.data.body, /\[Kontak\] Budi Santoso \(\+628123456789\)/);
+  const last = sent.at(-1);
+  assert.ok(last.content?.contacts, "payload contacts Baileys");
+  assert.equal(last.content.contacts.displayName, "Budi Santoso");
+  assert.match(last.content.contacts.contacts[0].vcard, /BEGIN:VCARD/);
+  assert.match(last.content.contacts.contacts[0].vcard, /TEL;TYPE=CELL:\+628123456789/);
+});
+
 test("reply: membalas pesan pribadi & grup menyertakan quoted key yang benar", async () => {
   // --- chat pribadi: balas pesan masuk pertama dari Budi
   const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
@@ -620,6 +635,75 @@ async function apiImportJson(contacts) {
   const { body } = await call("POST", `/api/devices/${device.id}/contacts/import`, { token: adminToken, body: { contacts } });
   return body.data;
 }
+
+test("history sync (reconnect): pesan lama disimpan tanpa auto-reply & webhook", async () => {
+  // Riwayat ala Baileys: tipe "append", berisi pesan masuk & keluar saat device offline.
+  const historyMsg = (text, jid, fromMe, id) => ({
+    key: { remoteJid: jid, fromMe, id },
+    pushName: fromMe ? undefined : "Kontak Lama",
+    messageTimestamp: Math.floor(Date.now() / 1000) - 86400, // 1 hari lalu
+    message: { conversation: text },
+  });
+
+  // Rule auto-reply ada (dibuat test sebelumnya) — pesan history TIDAK boleh memicunya.
+  const rulesBefore = await require("../src/api/models").AutoReplyRule.count();
+  const sentBefore = sent.length;
+
+  const old = historyMsg("halo lama", "628666666666@s.whatsapp.net", false, "HS1");
+  const own = historyMsg("dikirim dari HP", "628666666666@s.whatsapp.net", true, "HS2");
+  await handleIncoming(device, instance, old, { fromHistory: true });
+  await handleIncoming(device, instance, own, { fromHistory: true });
+
+  // Tersimpan di DB (masuk & keluar terbaca di dashboard)
+  const chat = await Chat.findOne({ where: { wa_jid: "628666666666@s.whatsapp.net" } });
+  assert.ok(chat, "chat dari history tersimpan");
+  const msgs = await Message.findAll({ where: { chat_id: chat.id } });
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs.find((m) => m.wa_message_id === "HS1").direction, "incoming");
+  assert.equal(msgs.find((m) => m.wa_message_id === "HS2").direction, "outgoing");
+
+  // Tidak ada auto-reply terkirim & tidak ada webhook history
+  assert.equal(sent.length, sentBefore, "auto-reply tidak terpicu oleh history");
+  assert.equal(await require("../src/api/models").AutoReplyRule.count(), rulesBefore);
+
+  // Untuk chat BARU dari history: last_message_at = waktu pesan history (sudah benar).
+  // Pastikan juga tidak bisa dimundurkan oleh history yang datang belakangan.
+  const before = new Date(chat.last_message_at).getTime();
+  await handleIncoming(device, instance, historyMsg("lebih tua lagi", "628666666666@s.whatsapp.net", false, "HS3"), { fromHistory: true });
+  await chat.reload();
+  assert.equal(new Date(chat.last_message_at).getTime(), before, "last_message_at tidak dimundurkan oleh history");
+});
+
+test("broadcast media: antrean berisi payload media per kontak", async () => {
+  const form = new FormData();
+  form.append("text", "Katalog {{nama}}");
+  form.append("contact_ids", JSON.stringify([]));
+  form.append("file", new Blob([Buffer.from("gambar-biner")], { type: "image/png" }), "katalog.png");
+
+  const res = await fetch(`${base}/api/devices/${device.id}/contacts/broadcast`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: form,
+  });
+  const { data } = await res.json();
+  assert.equal(res.status, 200);
+  assert.ok(data.queued >= 2, "broadcast media masuk antrean per kontak");
+
+  await drainQueue();
+  const mediaSends = sent.filter((s) => s.content?.image);
+  assert.ok(mediaSends.length >= 2, "media terkirim ke kontak oleh worker");
+  assert.ok(mediaSends.some((s) => s.content?.caption?.includes("Katalog")));
+});
+
+test("export kontak: CSV berisi nomor, nama, lid", async () => {
+  const res = await fetch(`${base}/api/devices/${device.id}/contacts/export`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(res.status, 200);
+  const csv = await res.text();
+  assert.match(csv, /phone,name,lid/);
+  assert.match(csv, /Budi Santoso/);
+});
 
 test("status pesan keluar naik: sent -> delivered -> read, dan dikirim ke webhook", async () => {
   const received = [];

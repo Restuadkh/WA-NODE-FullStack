@@ -211,9 +211,15 @@ class WhatsAppInstance extends EventEmitter {
       );
     });
     sock.ev.on("messages.upsert", ({ type, messages }) => {
-      if (type !== "notify") return; // pesan kita sendiri disimpan langsung oleh messageService
-      if (config.whatsapp.markMessagesRead) this._markRead(messages); // Tandai pesan sebagai dibaca jika diatur dalam konfigurasi
-      for (const msg of messages) this.emit("message", msg); // Emit event untuk setiap pesan baru
+      if (type === "notify") {
+        // _markRead hanya bila keduanya aktif: flag auto-ack DAN receipt tidak disenyapkan.
+        if (config.whatsapp.markMessagesRead && config.whatsapp.sendReadReceipts) this._markRead(messages);
+        for (const msg of messages) this.emit("message", msg); // Emit event untuk setiap pesan baru
+      } else if (type === "append") {
+        // History sync saat reconnect: pesan yang terjadi saat device offline (masuk & keluar).
+        // Disimpan tanpa auto-reply/webhook — diteruskan ke messageHandler lewat event khusus.
+        this.emit("message:history", messages);
+      }
     });
     sock.ev.on("messages.update", (updates) => this.emit("message.update", updates));
 
@@ -482,6 +488,17 @@ class WhatsAppInstance extends EventEmitter {
    */
   sendText(jid, text, opts = {}) {
     return this._ensureOnline().sendMessage(jid, { text }, buildSendOpts(opts));
+  }
+
+  /**
+   * Kirim kontak (vCard). `opts.quoted` sama seperti sendText.
+   */
+  sendContact(jid, { displayName, vcard }, opts = {}) {
+    return this._ensureOnline().sendMessage(
+      jid,
+      { contacts: { displayName, contacts: [{ vcard }] } },
+      buildSendOpts(opts),
+    );
   }
 
   // Status "composing"/"paused" untuk simulasi manusia (opsional, dipakai antrean).
