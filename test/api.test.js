@@ -443,17 +443,36 @@ test("balas dari dashboard: sukses, validasi, dan device offline", async () => {
 
 test("kirim kontak: vCard terkirim & tersimpan sebagai pesan [Kontak]", async () => {
   const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
+  const before = await Message.count({ where: { chat_id: priv.id } });
   const r = await call("POST", `/api/chats/${priv.id}/messages`, {
     token: agentToken,
-    body: { contact: { name: "Budi Santoso", phone: "628123456789" } },
+    body: { contact: { name: "Test Nomor Baru", phone: "0896123345667" } },
   });
   assert.equal(r.status, 201);
-  assert.match(r.body.data.body, /\[Kontak\] Budi Santoso \(\+628123456789\)/);
+  // Nomor lokal 08... dinormalisasi ke +62 otomatis.
+  assert.match(r.body.data.body, /\[Kontak\] Test Nomor Baru \(\+62896123345667\)/);
+  assert.equal(await Message.count({ where: { chat_id: priv.id } }), before + 1, "tersimpan di riwayat");
   const last = sent.at(-1);
   assert.ok(last.content?.contacts, "payload contacts Baileys");
-  assert.equal(last.content.contacts.displayName, "Budi Santoso");
+  assert.equal(last.content.contacts.displayName, "Test Nomor Baru");
   assert.match(last.content.contacts.contacts[0].vcard, /BEGIN:VCARD/);
-  assert.match(last.content.contacts.contacts[0].vcard, /TEL;TYPE=CELL:\+628123456789/);
+  assert.match(last.content.contacts.contacts[0].vcard, /TEL;TYPE=CELL:\+62896123345667/);
+
+  // Penerima (di sisi WhatsApp) bisa langsung membalas: simulasi pesan masuk dari
+  // nomor yang sama setelah menerima kartu kontak — masuk ke chat yang sama.
+  const inst = manager.get(device.instance_key);
+  await inst.emit("message", {
+    key: { remoteJid: "62896123345667@s.whatsapp.net", fromMe: false, id: "INC_REPLY_CONTACT" },
+    pushName: "Test Nomor Baru",
+    messageTimestamp: Math.floor(Date.now() / 1000),
+    message: { conversation: "halo, saya nomor dari kartu kontak" },
+  });
+  await new Promise((r2) => setTimeout(r2, 300));
+  const chat2 = await Chat.findOne({ where: { wa_jid: "62896123345667@s.whatsapp.net" } });
+  assert.ok(chat2, "chat dari penerima vCard terbentuk otomatis");
+  const incoming = await Message.findOne({ where: { wa_message_id: "INC_REPLY_CONTACT" } });
+  assert.ok(incoming, "balasan penerima tersimpan");
+  assert.equal(incoming.body, "halo, saya nomor dari kartu kontak");
 });
 
 test("reply: membalas pesan pribadi & grup menyertakan quoted key yang benar", async () => {
