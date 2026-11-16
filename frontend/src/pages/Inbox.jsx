@@ -301,16 +301,13 @@ export default function Inbox() {
 
   const send = async (e) => {
     e.preventDefault();
-    // Mode kirim kontak: kirim vCard — gabungan kontak terpilih di combobox + entri manual.
+    // Mode kirim kontak: kirim vCard dari kontak terpilih di combobox.
     if (contactForm) {
       if (!activeChat || sending) return;
       const contacts = contactList
         .filter((c) => contactForm.selected.has(c.id) && c.phone)
         .map((c) => ({ name: c.name || "", phone: c.phone }));
-      const manualName = contactForm.name.trim();
-      const manualPhone = contactForm.phone.trim();
-      if (manualPhone) contacts.push({ name: manualName, phone: manualPhone });
-      if (!contacts.length) return setError("Pilih kontak atau isi nomor manual dulu");
+      if (!contacts.length) return setError("Pilih minimal satu kontak dulu");
       setSending(true);
       setError("");
       try {
@@ -601,53 +598,61 @@ export default function Inbox() {
 
                 {contactForm && (
                   <div className="attachment-preview contact-form">
-                    {contactList.length > 0 && (
-                      <div className="contact-picker">
-                        {contactList.map((c) => (
-                          <label key={c.id} className="contact-option">
-                            <input
-                              type="checkbox"
-                              checked={contactForm.selected.has(c.id)}
-                              onChange={() =>
-                                setContactForm((cf) => {
-                                  const selected = new Set(cf.selected);
-                                  selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id);
-                                  return { ...cf, selected };
-                                })
-                              }
-                            />
-                            <span>
-                              {c.name ? `${c.name} (${c.phone})` : c.phone}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
+                    {contactList.length === 0 && (
+                      <span className="muted small">
+                        Belum ada kontak tersimpan untuk device ini — tambahkan dulu di halaman Kontak.
+                      </span>
                     )}
-                    <input
-                      className="input"
-                      placeholder="Nama kontak manual (opsional)"
-                      value={contactForm.name}
-                      onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
-                    />
-                    <input
-                      className="input mono"
-                      placeholder="Nomor manual (mis. 0896123345667)"
-                      value={contactForm.phone}
-                      onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={send}
-                      disabled={sending}
-                    >
-                      Kirim {contactForm.selected.size + (contactForm.phone.trim() ? 1 : 0) > 1
-                        ? `${contactForm.selected.size + (contactForm.phone.trim() ? 1 : 0)} kontak`
-                        : "kontak"}
-                    </button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setContactForm(null)} title="Batal kirim kontak">
-                      ✕
-                    </button>
+                    {contactList.length > 0 && (
+                      <>
+                        <input
+                          className="input"
+                          placeholder="Cari kontak… (centang yang mau dikirim, bisa banyak)"
+                          value={contactForm.q || ""}
+                          onChange={(e) => setContactForm({ ...contactForm, q: e.target.value })}
+                        />
+                        <div className="contact-picker">
+                          {contactList
+                            .filter((c) => {
+                              const q = (contactForm.q || "").toLowerCase();
+                              if (!q) return true;
+                              return `${c.name || ""} ${c.phone || ""}`.toLowerCase().includes(q);
+                            })
+                            .map((c) => (
+                              <label key={c.id} className="contact-option">
+                                <input
+                                  type="checkbox"
+                                  checked={contactForm.selected.has(c.id)}
+                                  onChange={() =>
+                                    setContactForm((cf) => {
+                                      const selected = new Set(cf.selected);
+                                      selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id);
+                                      return { ...cf, selected };
+                                    })
+                                  }
+                                />
+                                <span>{c.name ? `${c.name} (${c.phone})` : c.phone}</span>
+                              </label>
+                            ))}
+                        </div>
+                      </>
+                    )}
+                    <div className="form-row tight">
+                      <span className="muted small grow">
+                        Terpilih: {contactForm.selected.size} kontak
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={send}
+                        disabled={sending || !contactForm.selected.size}
+                      >
+                        Kirim {contactForm.selected.size > 1 ? `${contactForm.selected.size} kontak` : "kontak"}
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setContactForm(null)} title="Batal kirim kontak">
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -685,7 +690,7 @@ export default function Inbox() {
                     className={`btn btn-ghost icon-btn ${contactForm ? "active" : ""}`}
                     onClick={async () => {
                       if (contactForm) return setContactForm(null);
-                      setContactForm({ name: "", phone: "", selected: new Set() });
+                      setContactForm({ q: "", selected: new Set() });
                       // Ambil kontak device dari database untuk dropdown pilihan.
                       try {
                         const list = await api.listContacts(deviceId);
