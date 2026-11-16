@@ -165,26 +165,46 @@ async function sendMessage(req, res) {
   const reply = await resolveReplyTarget(chat, req.body?.replyTo);
   const quoted = reply?.quoted;
 
-  // Kirim kontak (vCard): body { contact: { name, phone } }.
-  const contact = req.body?.contact;
-  if (contact && typeof contact === "object") {
-    const name = String(contact.name ?? "").trim();
-    const digits = normalizePhoneDigits(contact.phone);
-    if (!digits || digits.length < 8) throw httpError("Nomor kontak tidak valid", 400);
-    const vcard = [
-      "BEGIN:VCARD",
-      "VERSION:3.0",
-      `FN:${name || digits}`,
-      `TEL;TYPE=CELL:+${digits}`,
-      "END:VCARD",
-    ].join("\n");
+  // Kirim kontak (vCard): body { contact: { name, phone } } ATAU
+  // { contacts: [{ name, phone }, ...] } — banyak kontak dalam SATU pesan vCard.
+  const rawContacts = Array.isArray(req.body?.contacts) && req.body.contacts.length
+    ? req.body.contacts
+    : req.body?.contact && typeof req.body.contact === "object"
+      ? [req.body.contact]
+      : null;
+  if (rawContacts) {
+    const entries = [];
+    for (const c of rawContacts.slice(0, 25)) {
+      if (!c || typeof c !== "object") continue;
+      const name = String(c.name ?? "").trim();
+      const digits = normalizePhoneDigits(c.phone);
+      if (!digits || digits.length < 8) throw httpError(`Nomor kontak tidak valid: ${name || "(tanpa nama)"}`, 400);
+      entries.push({
+        name,
+        digits,
+        vcard: [
+          "BEGIN:VCARD",
+          "VERSION:3.0",
+          `FN:${name || digits}`,
+          `TEL;TYPE=CELL:+${digits}`,
+          "END:VCARD",
+        ].join("\n"),
+      });
+    }
+    if (!entries.length) throw httpError("Tidak ada kontak yang valid untuk dikirim", 400);
+
+    const displayName = entries.length === 1 ? entries[0].name || entries[0].digits : `${entries.length} kontak`;
+    const previewBody =
+      entries.length === 1
+        ? `[Kontak] ${displayName} (+${entries[0].digits})`
+        : `[Kontak] ${entries.length} kontak: ${entries.map((e) => e.name || `+${e.digits}`).join(", ")}`;
 
     const { message, storageFailed } = await sendAndStore({
       device: chat.Device,
       instance,
       to: chat.wa_jid,
-      send: (inst, jid) => inst.sendContact(jid, { displayName: name || digits, vcard }, { quoted }),
-      preview: { type: "other", body: `[Kontak] ${name || digits} (+${digits})` },
+      send: (inst, jid) => inst.sendContact(jid, { displayName, vcards: entries.map((e) => e.vcard) }, { quoted }),
+      preview: { type: "other", body: previewBody },
       userId: req.user.id,
       replyTo: reply?.info,
     });

@@ -139,9 +139,10 @@ export const api = {
   // Pastikan Chat untuk kontak ada, -> { chat_id, device_id } untuk dibuka di Inbox.
   openContact: (deviceId, id) =>
     request(`/api/devices/${deviceId}/contacts/${id}/open`, { method: "POST" }).then(data),
-  // Kirim kartu kontak (vCard) ke sebuah chat.
-  sendContact: (chatId, name, phone) =>
-    request(`/api/chats/${chatId}/messages`, { method: "POST", body: { contact: { name, phone } } }).then(data),
+  // Kirim kartu kontak (vCard) ke sebuah chat. `contacts` = array {name, phone};
+  // bisa banyak sekaligus — terkirim sebagai satu pesan berisi daftar kontak.
+  sendContact: (chatId, contacts) =>
+    request(`/api/chats/${chatId}/messages`, { method: "POST", body: { contacts } }).then(data),
   // Broadcast lewat antrean anti-ban. Template: {{nama}}, {{nomor}}. Media: file opsional.
   broadcastContacts: (deviceId, { text, contact_ids, file } = {}) => {
     if (file) {

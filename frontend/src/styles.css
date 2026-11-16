@@ -442,6 +442,14 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2);
 }
+/* Combobox multi-pilih kontak (form kirim vCard di Inbox). */
+.contact-form { align-items: stretch; flex-direction: column; }
+.contact-picker {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 180px; overflow-y: auto; padding-right: 4px;
+}
+.contact-option { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; padding: 2px 0; }
+.contact-option:hover { background: var(--surface-3, rgba(0,0,0,.04)); border-radius: 6px; }
 .preview-media { max-height: 120px; max-width: 220px; border-radius: 8px; display: block; }
 .preview-sticker { height: 90px; width: 90px; object-fit: contain; }
 .preview-audio { max-width: 260px; height: 34px; }

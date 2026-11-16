@@ -491,12 +491,16 @@ class WhatsAppInstance extends EventEmitter {
   }
 
   /**
-   * Kirim kontak (vCard). `opts.quoted` sama seperti sendText.
+   * Kirim kontak (vCard). `vcards` = array string vCard — bisa BANYAK kontak dalam
+   * satu pesan (penerima melihat daftar kontak yang bisa di-tap satu per satu).
+   * `opts.quoted` sama seperti sendText.
    */
-  sendContact(jid, { displayName, vcard }, opts = {}) {
+  sendContact(jid, { displayName, vcards }, opts = {}) {
+    const list = Array.isArray(vcards) ? vcards : vcards ? [vcards] : [];
+    if (!list.length) throw new Error("vCard kosong");
     return this._ensureOnline().sendMessage(
       jid,
-      { contacts: { displayName, contacts: [{ vcard }] } },
+      { contacts: { displayName, contacts: list.map((vcard) => ({ vcard })) } },
       buildSendOpts(opts),
     );
   }

@@ -475,6 +475,34 @@ test("kirim kontak: vCard terkirim & tersimpan sebagai pesan [Kontak]", async ()
   assert.equal(incoming.body, "halo, saya nomor dari kartu kontak");
 });
 
+test("kirim banyak kontak sekaligus: satu pesan berisi daftar vCard", async () => {
+  const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
+  const r = await call("POST", `/api/chats/${priv.id}/messages`, {
+    token: agentToken,
+    body: {
+      contacts: [
+        { name: "Kontak Pertama", phone: "0896123345667" },
+        { name: "Kontak Kedua", phone: "628123456789" },
+        { name: "", phone: "+62 812-9999-8888" },
+      ],
+    },
+  });
+  assert.equal(r.status, 201);
+  assert.match(r.body.data.body, /\[Kontak\] 3 kontak: Kontak Pertama, Kontak Kedua, \+6281299998888/);
+  const last = sent.at(-1);
+  assert.equal(last.content.contacts.displayName, "3 kontak");
+  assert.equal(last.content.contacts.contacts.length, 3, "3 vCard dalam 1 pesan");
+  assert.match(last.content.contacts.contacts[0].vcard, /TEL;TYPE=CELL:\+62896123345667/);
+  assert.match(last.content.contacts.contacts[2].vcard, /FN:6281299998888/, "tanpa nama pakai nomor");
+
+  // Nomor tidak valid ditolak dengan 400.
+  const bad = await call("POST", `/api/chats/${priv.id}/messages`, {
+    token: agentToken,
+    body: { contacts: [{ name: "Rusak", phone: "123" }] },
+  });
+  assert.equal(bad.status, 400);
+});
+
 test("reply: membalas pesan pribadi & grup menyertakan quoted key yang benar", async () => {
   // --- chat pribadi: balas pesan masuk pertama dari Budi
   const priv = await Chat.findOne({ where: { wa_jid: "628111111111@s.whatsapp.net" } });
