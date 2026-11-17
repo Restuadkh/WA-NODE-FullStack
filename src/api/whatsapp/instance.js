@@ -30,6 +30,11 @@ let versionCache = { at: 0, version: null };
 let versionPromise = null;
 const VERSION_TTL_MS = 6 * 60 * 60 * 1000;
 
+// Error kecil untuk validasi kirim media (statusCode 400, ditangkap errorHandler).
+function httpError400(message) {
+  return Object.assign(new Error(message), { statusCode: 400 });
+}
+
 async function resolveVersion() {
   if (versionCache.version && Date.now() - versionCache.at < VERSION_TTL_MS) {
     return versionCache.version;
@@ -515,6 +520,11 @@ class WhatsAppInstance extends EventEmitter {
    * Opsi: { ptt (audio voice note), seconds, width, height, gifPlayback }
    */
   sendMedia(jid, { buffer, mimetype, filename, seconds, width, height }, type, caption = "", opts = {}) {
+    // Validasi dini: buffer kosong atau type tidak dikenal jangan sampai sampai ke Baileys
+    // (error aneh dari Baileys bisa mematikan proses). Lebih baik 400 ke pemanggil.
+    const KNOWN = ["image", "video", "audio", "sticker", "document"];
+    if (!Buffer.isBuffer(buffer) || !buffer.length) throw httpError400("File media kosong/tidak terbaca");
+    if (!KNOWN.includes(type)) throw httpError400(`Jenis media tidak dikenal: ${type}`);
     const content = {};
     if (type === "sticker") {
       content.sticker = buffer;

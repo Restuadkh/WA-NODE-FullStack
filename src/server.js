@@ -104,8 +104,11 @@ async function main() {
 
 process.on("unhandledRejection", (err) => logger.error({ err }, "Unhandled promise rejection"));
 process.on("uncaughtException", (err) => {
-  logger.fatal({ err }, "Uncaught exception");
-  process.exit(1); // PM2 akan menjalankan ulang
+  // Log detail (stack + cause) lalu TETAP HIDUP — sebelumnya process.exit(1) membuat
+  // PM2 merestart service dan sesi WhatsApp terputus setiap ada error liar.
+  logger.fatal({ err, stack: err?.stack, cause: err?.cause?.message }, "Uncaught exception (proses tetap berjalan)");
+  // Tulis juga ke stderr sebagai cadangan bila logger bermasalah.
+  console.error("UNCAUGHT EXCEPTION:", err?.stack || err);
 });
 
 main().catch((err) => {
