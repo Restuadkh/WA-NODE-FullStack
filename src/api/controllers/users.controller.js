@@ -166,6 +166,7 @@ async function deleteUser(req, res) {
   }
   await DeviceAgent.destroy({ where: { user_id: user.id } });
   await user.destroy();
+  require("../services/deviceAccess").invalidateDeviceAccess(user.id); // cache ACL segera
   res.json({ error: false, message: "User dihapus" });
 }
 
@@ -195,6 +196,7 @@ async function assignDevices(user, deviceIds, owner) {
   if (unique.length) {
     await DeviceAgent.bulkCreate(unique.map((device_id) => ({ user_id: user.id, device_id })));
   }
+  require("../services/deviceAccess").invalidateDeviceAccess(user.id); // cache ACL segera
   return unique;
 }
 
@@ -220,6 +222,7 @@ async function setUserPermissions(req, res) {
 
   const row = (await UserPermission.findByPk(user.id)) || (await UserPermission.create({ user_id: user.id }));
   await row.update(patch);
+  roleAccess.invalidateUser(user); // cache izin user diperbarui segera
 
   const access = await roleAccess.resolveForUser(user);
   res.json({

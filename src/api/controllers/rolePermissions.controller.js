@@ -58,6 +58,7 @@ async function updatePermissions(req, res) {
   await live.update(patch);
 
   const updated = await roleAccess.getRoleConfig(target);
+  roleAccess.invalidateRole(target); // cache izin role diperbarui segera
   res.json({ error: false, data: updated });
 }
 

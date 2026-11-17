@@ -103,6 +103,7 @@ async function createDevice(req, res) {
   // (super_admin tidak memerlukan penugasan — aksesnya penuh).
   const allowed = await allowedDeviceIds(req.user);
   if (allowed) await DeviceAgent.create({ user_id: req.user.id, device_id: device.id });
+  require("../services/deviceAccess").invalidateDeviceAccess(req.user.id); // cache ACL segera
   startInBackground(device);
   res.status(201).json({ error: false, data: serialize(device, req.user) });
 }
@@ -232,6 +233,8 @@ async function removeDevice(req, res) {
     await DeviceAgent.destroy({ where: { device_id: device.id }, transaction: t });
     await device.destroy({ transaction: t });
   });
+  // Cache ACL semua user ikut segar (device hilang dari daftar penugasan).
+  require("../services/deviceAccess").invalidateAllDeviceAccess();
   // File media di disk dihapus setelah DB berhasil (gagal hapus file tidak fatal).
   await mediaStore.removeDeviceMedia(device.id);
 

@@ -209,6 +209,8 @@ test("device: webhook per device disimpan, disembunyikan dari agent, dan bisa di
   const { DeviceAgent } = require("../src/api/models");
   const agentUser = await User.findOne({ where: { email: "agen@test.id" } });
   await DeviceAgent.create({ user_id: agentUser.id, device_id: created.body.data.id });
+  // Tulis langsung ke DB tidak lewat API -> cache ACL (30s) di-refresh manual.
+  require("../src/api/services/deviceAccess").invalidateAllDeviceAccess();
   const agentView = (await call("GET", "/api/devices", { token: agentToken })).body.data.find(
     (d) => d.id === created.body.data.id,
   );

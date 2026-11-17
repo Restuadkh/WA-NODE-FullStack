@@ -3,6 +3,7 @@
  * Mendukung remoteJid / remoteJidAlt / participant / participantAlt.
  */
 const { ContactName } = require("../models");
+const cache = require("./cache");
 
 // Ambil identitas pertama (urut prioritas) yang berakhiran suffix tertentu
 function pickJid(key, suffix) {
@@ -25,8 +26,13 @@ function getWhatsappName(message) {
 }
 
 // Simpan / perbarui nama kontak. Satu baris per (device, lid): tidak menumpuk tiap pesan masuk.
+// Cache 60 detik per kombinasi (device, lid, jid, nama): pesan beruntun dari kontak yang sama
+// tidak perlu findOne ulang — datanya identik, tidak ada yang perlu diperbarui.
 async function storeNumberName(jid, lid, name, device) {
   if (!jid || !lid || !name) return;
+
+  const cacheKey = `num:${device.id}:${lid}:${jid}:${name}`;
+  if (cache.get(cacheKey)) return;
 
   const where = { device_id: device.id, lid_user: lid };
   const existing = await ContactName.findOne({ where });
@@ -35,11 +41,13 @@ async function storeNumberName(jid, lid, name, device) {
     if (existing.notify !== name) patch.notify = name;
     if (existing.from_jid !== jid) patch.from_jid = jid;
     if (Object.keys(patch).length) await existing.update(patch);
+    cache.set(cacheKey, true, 60_000);
     return;
   }
 
   try {
     await ContactName.create({ ...where, from_jid: jid, notify: name });
+    cache.set(cacheKey, true, 60_000);
   } catch (err) {
     // Dua pesan dari kontak yang sama bisa tiba bersamaan: yang kalah balapan cukup diabaikan
     if (err.name !== "SequelizeUniqueConstraintError") throw err;

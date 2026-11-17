@@ -1,5 +1,6 @@
 const { RolePermission } = require("../models");
 const httpError = require("./httpError");
+const cache = require("./cache");
 
 // Hierarki role: level kecil = kuasa besar. super_admin (1) mengatur admin (2) & agent (3);
 // admin (2) hanya mengatur agent (3).
@@ -48,14 +49,22 @@ function defaultsFor(role) {
 // Baris konfigurasi sebuah role (dibuat dengan nilai default bila belum ada).
 // super_admin SELALU akses penuh — barisnya tidak pernah dibaca dari DB, sehingga
 // kolom izin baru (mis. contacts_import) tidak membuat super admin kehilangan izin.
+// Cache 30 detik per role: middleware izin memanggil ini di setiap request.
 async function getRoleConfig(role) {
   if (!LEVELS[role]) throw httpError("Role tidak dikenal", 400);
-  if (role === "super_admin") return defaultsFor(role);
-  const [row, created] = await RolePermission.findOrCreate({
-    where: { role },
-    defaults: rolesDefaultsRow(role),
+  if (role === "super_admin") return defaultsFor(role); // murni, tidak perlu cache
+  return cache.wrap(`role:${role}`, 30_000, async () => {
+    const [row, created] = await RolePermission.findOrCreate({
+      where: { role },
+      defaults: rolesDefaultsRow(role),
+    });
+    return created ? cleanRow(row) : { role, ...Object.fromEntries(Object.keys(PERMISSIONS).map((k) => [k, Boolean(row[k])])) };
   });
-  return created ? cleanRow(row) : { role, ...Object.fromEntries(Object.keys(PERMISSIONS).map((k) => [k, Boolean(row[k])])) };
+}
+
+function invalidateRole(role) {
+  cache.invalidate(`role:${role}`);
+  cache.invalidatePrefix(`perm:${role}:`);
 }
 
 function rolesDefaultsRow(role) {
@@ -85,15 +94,25 @@ async function resolveForUser(user) {
 }
 
 // Apakah user boleh melakukan aksi ini? Urutan: super_admin (selalu) > override user > rule role.
+// Cache 15 detik per (user, action) — cukup cepat untuk tiap request, perubahan izin
+// berlaku maksimal 15 detik (atau segera bila endpoint izin memanggil invalidate).
 async function can(user, action) {
   if (!user?.role) return false;
   if (user.role === "super_admin") return true;
   if (!(action in PERMISSIONS)) return false;
-  const { UserPermission } = require("../models");
-  const row = await UserPermission.findByPk(user.id);
-  if (row && row[action] !== null && row[action] !== undefined) return Boolean(row[action]);
-  const config = await getRoleConfig(user.role);
-  return Boolean(config[action]);
+  return cache.wrap(`perm:${user.role}:${user.id}:${action}`, 15_000, async () => {
+    const { UserPermission } = require("../models");
+    const row = await UserPermission.findByPk(user.id);
+    if (row && row[action] !== null && row[action] !== undefined) return Boolean(row[action]);
+    const config = await getRoleConfig(user.role);
+    return Boolean(config[action]);
+  });
+}
+
+// Hapus cache izin satu user (setelah override user diubah) + cache role-nya.
+function invalidateUser(user) {
+  cache.invalidatePrefix(`perm:${user?.role || ""}:${user?.id}:`);
+  if (user?.role) cache.invalidate(`role:${user.role}`);
 }
 
 // Middleware: gagal 403 bila user tidak punya izin setelah pengecekan role kasar di route.
@@ -114,4 +133,4 @@ function canManageRole(actorRole, targetRole) {
   return LEVELS[actorRole] < LEVELS[targetRole];
 }
 
-module.exports = { PERMISSIONS, LEVELS, DEFAULTS, defaultsFor, rolesDefaultsRow, getRoleConfig, cleanRow, can, resolveForUser, requirePermission, canManageRole };
+module.exports = { PERMISSIONS, LEVELS, DEFAULTS, defaultsFor, rolesDefaultsRow, getRoleConfig, cleanRow, can, resolveForUser, requirePermission, canManageRole, invalidateRole, invalidateUser };
