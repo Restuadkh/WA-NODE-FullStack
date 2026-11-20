@@ -1023,8 +1023,17 @@ test("antrean: validasi, boleh enqueue saat device offline, dan worker mengirim"
   assert.equal(batch.status, 201);
   assert.equal(batch.body.data.queued, 2);
   await drainQueue();
-  // Broadcast dari test lain menambah job ber-source "broadcast" — hitung hanya job test ini.
-  assert.equal(await MessageJob.count({ where: { status: "sent", device_id: device.id, source: { [require("sequelize").Op.ne]: "broadcast" } } }), 4);
+  // Broadcast & kirim Inbox dari test lain menambah job — hitung hanya job test ini.
+  assert.equal(
+    await MessageJob.count({
+      where: {
+        status: "sent",
+        device_id: device.id,
+        source: { [require("sequelize").Op.notIn]: ["broadcast", "inbox"] },
+      },
+    }),
+    4,
+  );
 });
 
 test("antrean media: file disimpan sementara, dikirim, lalu dibersihkan", async () => {
@@ -1051,6 +1060,113 @@ test("antrean media: file disimpan sementara, dikirim, lalu dibersihkan", async 
   assert.equal(mediaStore.resolve(device.id, job.payload.media.disk_name), null, "file sementara dihapus");
   assert.equal(Buffer.from(sent.at(-1).content.image).toString(), "antrean-img");
   assert.equal(sent.at(-1).content.caption, "Dari antrean");
+});
+
+test("restart mendadak: job gambar antrean yang baru diklaim langsung pulih saat start", async () => {
+  const form = new FormData();
+  form.append("id", "0811222888");
+  form.append("type", "image");
+  form.append("caption", "Setelah restart");
+  form.append("file", new Blob([Buffer.from("restart-img")], { type: "image/png" }), "restart.png");
+
+  const res = await fetch(`${base}/api/message/queue/media?key=${device.instance_key}`, {
+    method: "POST",
+    body: form,
+  });
+  assert.equal(res.status, 201);
+  const job = await MessageJob.findByPk((await res.json()).data.id);
+
+  // Simulasikan mati mendadak tepat setelah worker mengklaim (claimed_at masih segar).
+  await job.update({ status: "sending", claimed_at: new Date(), attempts: 1 });
+
+  // Tahan instance agar worker tidak langsung mengirim — kita ingin melihat status
+  // hasil pemulihan, bukan hasil pengiriman.
+  instance.status = "disconnected";
+  await queueService.start();
+  await new Promise((r) => setTimeout(r, 50)); // tunggu tick awal dari start() selesai
+  try {
+    await job.reload();
+    assert.equal(job.status, "pending", "job tidak boleh mandek 15 menit setelah restart");
+    assert.equal(job.claimed_at, null);
+    instance.status = "connected";
+    await drainQueue(10);
+    await job.reload();
+    assert.equal(job.status, "sent");
+    assert.equal(Buffer.from(sent.at(-1).content.image).toString(), "restart-img");
+    assert.equal(sent.at(-1).content.caption, "Setelah restart");
+  } finally {
+    instance.status = "connected";
+    await queueService.stop();
+  }
+});
+
+test("restart mendadak saat kirim gambar Inbox: outbox dipulihkan worker", async () => {
+  const jid = "628999900001@s.whatsapp.net";
+  const [chat] = await Chat.findOrCreate({ where: { device_id: device.id, wa_jid: jid } });
+  const agent = await User.findOne({ where: { email: "agen@test.id" } });
+
+  // Ini yang dilakukan controller Inbox SEBELUM memanggil WhatsApp.
+  const staged = await queueService.beginDirectSend({
+    device,
+    to: jid,
+    type: "image",
+    payload: { caption: "Pulihkan", ptt: false },
+    source: "inbox",
+    userId: agent.id,
+    chatId: chat.id,
+    replyTo: null,
+    quoted: { key: { remoteJid: jid, id: "QUOTED1", fromMe: false }, message: { conversation: "kutipan" } },
+    mediaBuffer: Buffer.from("inbox-restart-img"),
+    mimetype: "image/png",
+    filename: "inbox.png",
+  });
+  assert.equal(staged.status, "sending");
+  assert.ok(mediaStore.resolve(device.id, staged.payload.media.disk_name), "file sementara ada sebelum kirim");
+
+  // Proses mati sebelum WhatsApp menerima pesan; service dinyalakan lagi.
+  await queueService.start();
+  await new Promise((r) => setTimeout(r, 50)); // tunggu tick awal dari start() selesai
+  try {
+    await drainQueue(10);
+    await staged.reload();
+    assert.equal(staged.status, "sent");
+    assert.equal(mediaStore.resolve(device.id, staged.payload.media.disk_name), null, "file sementara dibersihkan");
+    assert.equal(Buffer.from(sent.at(-1).content.image).toString(), "inbox-restart-img");
+    assert.equal(sent.at(-1).opts.quoted.key.id, "QUOTED1", "kutipan asal ikut dipulihkan");
+
+    const saved = await Message.findByPk(staged.message_id);
+    assert.equal(saved.body, "[Gambar] Pulihkan");
+    assert.equal(saved.media_filename, "inbox.png");
+    assert.equal(saved.chat_id, chat.id, "pesan tetap masuk ke chat asal");
+    assert.equal(saved.sent_by_user_id, agent.id, "pengirim asal tetap tercatat");
+  } finally {
+    await queueService.stop();
+  }
+});
+
+test("Inbox: gambar ditulis sebagai outbox lebih dulu, lalu ditutup saat terkirim", async () => {
+  const [chat] = await Chat.findOrCreate({
+    where: { device_id: device.id, wa_jid: "628999900002@s.whatsapp.net" },
+  });
+  const before = await MessageJob.count({ where: { source: "inbox" } });
+
+  const form = new FormData();
+  form.append("file", new Blob([Buffer.from("inbox-live")], { type: "image/png" }), "live.png");
+  form.append("caption", "Langsung");
+  const res = await fetch(`${base}/api/chats/${chat.id}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${agentToken}` },
+    body: form,
+  });
+  assert.equal(res.status, 201);
+
+  const jobs = await MessageJob.findAll({ where: { source: "inbox" }, order: [["createdAt", "DESC"]] });
+  assert.equal(jobs.length, before + 1, "satu outbox dibuat untuk kirim gambar Inbox");
+  assert.equal(jobs[0].status, "sent");
+  assert.equal(jobs[0].payload.caption, "Langsung");
+  assert.equal(jobs[0].payload.chat_id, chat.id);
+  assert.ok(jobs[0].message_id);
+  assert.equal(mediaStore.resolve(device.id, jobs[0].payload.media.disk_name), null);
 });
 
 test("antrean: daftar, statistik, jadwal masa depan, batal, dan ulang (admin)", async () => {

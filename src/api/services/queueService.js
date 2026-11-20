@@ -264,7 +264,7 @@ async function runJob(job, device, instance) {
     if (job.type === "text") {
       const text = String(payload.text || "");
       if (!text) throw permanentError("Isi pesan kosong");
-      send = (inst, jid) => inst.sendText(jid, text);
+      send = (inst, jid) => inst.sendText(jid, text, payload.quoted ? { quoted: payload.quoted } : {});
       preview = { type: "text", body: text };
       if (config.queue.typing) await simulateTyping(instance, job.to_jid, text);
     } else {
@@ -282,8 +282,19 @@ async function runJob(job, device, instance) {
         ptt: !!payload.ptt,
       };
       preview = { type: job.type, body: mediaPreview(job.type, payload) };
-      send = (inst, jid) => inst.sendMedia(jid, attachment, job.type, caption, { ptt: !!payload.ptt });
+      send = (inst, jid) =>
+        inst.sendMedia(jid, attachment, job.type, caption, {
+          ptt: !!payload.ptt,
+          ...(payload.quoted ? { quoted: payload.quoted } : {}),
+        });
     }
+
+    // Job kirim langsung (Inbox) menyimpan chat & kutipan asal di payload agar pesan
+    // yang dipulihkan setelah restart tetap masuk ke chat yang sama dan tetap jadi reply.
+    let chat = payload.chat_id ? await Chat.findByPk(payload.chat_id) : null;
+    const replyTo = payload.reply_to
+      ? { waId: payload.reply_to.waId, body: payload.reply_to.body || "", fromMe: !!payload.reply_to.fromMe }
+      : undefined;
 
     const { message, storageFailed } = await sendAndStore({
       device,
@@ -292,7 +303,9 @@ async function runJob(job, device, instance) {
       send,
       preview,
       attachment,
-      userId: job.created_by_user_id,
+      chat,
+      replyTo,
+      userId: job.created_by_user_id || payload.user_id,
     });
     delivered = true;
     deliveredMessage = message || null;
@@ -439,14 +452,16 @@ async function start() {
   started = true;
   stopped = false;
 
-  // Job "sending" dikembalikan ke antrean bila klaimnya sudah basi (worker mati):
-  // null = versi lama / klaim oleh proses yang sudah mati sebelum sempat menyimpan waktu.
-  const staleBefore = new Date(Date.now() - STALE_CLAIM_MS);
+  // Saat proses baru menyala tidak ada pengiriman in-flight: semua job "sending"
+  // adalah sisa proses sebelumnya yang mati mendadak (termasuk kirim gambar Inbox).
+  // Kembalikan SEMUanya sekarang juga — jangan tunggu claimed_at basi 15 menit.
+  // `tick()` tetap memakai STALE_CLAIM_MS agar tidak merebut job yang sedang dikirim
+  // oleh proses yang masih hidup.
   const [reset] = await MessageJob.update(
     { status: "pending", next_attempt_at: new Date(), claimed_at: null },
-    { where: { status: "sending", [Op.or]: [{ claimed_at: null }, { claimed_at: { [Op.lt]: staleBefore } }] } },
+    { where: { status: "sending" } },
   );
-  if (reset) logger.warn({ jumlah: reset }, "Job antrean yang terputus dikembalikan ke pending");
+  if (reset) logger.warn({ jumlah: reset }, "Job antrean yang terputus dikembalikan ke pending saat start");
 
   if (!config.queue.enabled) {
     logger.info("Antrean pesan nonaktif (QUEUE_ENABLED=false)");
@@ -476,6 +491,95 @@ async function stop() {
   const deadline = Date.now() + 10000;
   while (processing.size && Date.now() < deadline) await sleep(100);
   started = false;
+}
+
+// ------------------------------------------------------------------ kirim langsung
+
+// Kirim dari Inbox tetap langsung (responsif), TAPI catatan pengiriman dan salinan
+// medianya ditulis ke DB/disk lebih dulu. Kalau proses mati mendadak sebelum WhatsApp
+// menerima pesan, start() mengembalikan job ini ke pending dan worker mengirim ulang
+// dari file sementara — gambar tidak hilang begitu saja.
+async function beginDirectSend({
+  device,
+  to,
+  type,
+  payload = {},
+  source = "inbox",
+  userId,
+  chatId,
+  replyTo,
+  quoted,
+  mediaBuffer,
+  mimetype,
+  filename,
+}) {
+  const id = orderedUuid();
+  const finalPayload = { ...payload };
+  if (mediaBuffer?.length) {
+    const saved = await mediaStore.save({
+      deviceId: device.id,
+      messageId: id,
+      buffer: mediaBuffer,
+      mimetype,
+      filename,
+      type,
+    });
+    finalPayload.media = { ...saved, type };
+  }
+  if (chatId) finalPayload.chat_id = chatId;
+  if (replyTo) {
+    finalPayload.reply_to = {
+      waId: replyTo.waId || null,
+      body: replyTo.body || "",
+      fromMe: !!replyTo.fromMe,
+    };
+  }
+  if (quoted) finalPayload.quoted = quoted; // objek quoted siap pakai Baileys saat dipulihkan
+  if (userId) finalPayload.user_id = userId;
+
+  let job;
+  try {
+    job = await MessageJob.create({
+      id,
+      device_id: device.id,
+      to_jid: toJid(to),
+      type,
+      payload: finalPayload,
+      status: "sending", // dikunci proses yang sedang kirim; worker tidak mengambilnya
+      claimed_at: new Date(),
+      scheduled_at: new Date(),
+      priority: 0,
+      max_attempts: config.queue.maxAttempts,
+      source,
+      created_by_user_id: userId || null,
+    });
+  } catch (err) {
+    if (finalPayload.media?.disk_name) await mediaStore.remove(device.id, finalPayload.media.disk_name);
+    throw err;
+  }
+  return job;
+}
+
+async function finishDirectSend(job, deviceId, message, storageFailed) {
+  await job.update({
+    status: "sent",
+    sent_at: new Date(),
+    message_id: message?.id || null,
+    next_attempt_at: null,
+    claimed_at: null,
+    last_error: storageFailed ? "Pesan terkirim tetapi gagal disimpan ke riwayat" : null,
+  });
+  await cleanupMedia(job, deviceId);
+}
+
+async function failDirectSend(job, err) {
+  await job.update({
+    status: "failed",
+    last_error: String(err?.message || err).slice(0, 1000),
+    next_attempt_at: null,
+    claimed_at: null,
+  });
+  // File sementara sengaja dibiarkan supaya tombol "Ulangi" di Antrian masih bisa dipakai.
 }
 
 async function stats(deviceId) {
@@ -549,6 +653,9 @@ module.exports = {
   enqueue,
   enqueueText,
   enqueueMedia,
+  beginDirectSend,
+  finishDirectSend,
+  failDirectSend,
   countOutgoing,
   withinActiveHours,
   _tick: tick,

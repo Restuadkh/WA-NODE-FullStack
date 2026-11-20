@@ -2,8 +2,10 @@ const { Op } = require("sequelize");
 const { Chat, Message, Device, ContactName } = require("../models");
 const manager = require("../whatsapp/manager");
 const { sendAndStore, PREVIEW } = require("../services/messageService");
+const logger = require("../services/logger");
 const { phoneFromJid, normalizePhoneDigits } = require("../whatsapp/jid");
 const mediaStore = require("../services/mediaStore");
+const queueService = require("../services/queueService");
 const { assertDeviceAccess } = require("../services/deviceAccess");
 
 const httpError = require("../services/httpError");
@@ -226,16 +228,54 @@ async function sendMessage(req, res) {
     };
     const label = type === "audio" && ptt ? "[Pesan suara]" : PREVIEW[type] || "[Media]";
 
-    const { message, storageFailed } = await sendAndStore({
+    // Tulis outbox + salinan file ke disk SEBELUM memanggil WhatsApp. Kirim tetap
+    // langsung, tetapi bila service mati mendadak di tengah jalan job ini dipulihkan
+    // worker saat start (lihat queueService.beginDirectSend/finishDirectSend).
+    const staged = await queueService.beginDirectSend({
       device: chat.Device,
-      instance,
       to: chat.wa_jid,
-      send: (inst, jid) => inst.sendMedia(jid, file, type, caption, { ptt, quoted }),
-      preview: { type, body: caption ? `${label} ${caption}` : label },
-      attachment: { ...file, type, caption, ptt },
+      type,
+      payload: { caption, ptt },
+      source: "inbox",
       userId: req.user.id,
+      chatId: chat.id,
       replyTo: reply?.info,
+      quoted: quoted || undefined,
+      mediaBuffer: file.buffer,
+      mimetype: file.mimetype,
+      filename: file.filename,
     });
+
+    let result;
+    try {
+      result = await sendAndStore({
+        device: chat.Device,
+        instance,
+        to: chat.wa_jid,
+        send: (inst, jid) => inst.sendMedia(jid, file, type, caption, { ptt, quoted }),
+        preview: { type, body: caption ? `${label} ${caption}` : label },
+        attachment: { ...file, type, caption, ptt },
+        userId: req.user.id,
+        replyTo: reply?.info,
+      });
+    } catch (err) {
+      // Belum sampai ke WhatsApp — tandai gagal, file sementara disimpan untuk tombol Ulangi.
+      try {
+        await queueService.failDirectSend(staged, err);
+      } catch (stageErr) {
+        logger.warn({ err: stageErr.message }, "Gagal menandai job outbox Inbox sebagai failed");
+      }
+      throw err;
+    }
+
+    // Pesan sudah terkirim. Kegagalan menutup catatan outbox tidak boleh dianggap
+    // pengiriman gagal (jangan sampai klien mengirim ulang).
+    try {
+      await queueService.finishDirectSend(staged, chat.Device.id, result.message, result.storageFailed);
+    } catch (err) {
+      logger.error({ err, job: staged.id }, "Gagal menutup outbox Inbox (pesan sudah terkirim)");
+    }
+    const { message, storageFailed } = result;
 
     if (storageFailed) {
       return res.status(202).json({

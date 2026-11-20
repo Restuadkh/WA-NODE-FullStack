@@ -16,7 +16,7 @@
     "db:reset": "node src/scripts/syncDb.js --force",
     "seed:admin": "node src/scripts/seedAdmin.js",
     "seed:user": "node src/scripts/seedUser.js",
-    "test": "node --test test",
+    "test": "node --test \"test/*.test.js\"",
     "db:upgrade": "node src/scripts/dbUpgrade.js",
     "lint": "eslint .",
     "audit:prod": "npm audit --omit=dev",

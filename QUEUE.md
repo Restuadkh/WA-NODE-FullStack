@@ -42,7 +42,7 @@ Aplikasi Anda ──POST /api/message/queue──► tabel message_jobs (pending
 - **Device boleh offline saat enqueue.** Job menunggu sampai device `connected`, lalu dikirim.
 - **Job gagal** dicoba ulang dengan backoff (default 3 percobaan).
 
-Pesan dari dashboard/auto-reply tetap dikirim **langsung** (tidak lewat antrean) karena bersifat responsif. Kuota antrean tetap menghitung semua pesan keluar device, termasuk balasan manual tersebut.
+Pesan teks dari dashboard/auto-reply tetap dikirim **langsung** (tidak lewat antrean) karena bersifat responsif. Media yang dikirim dari Inbox juga langsung, tetapi **catatan pengirimannya (job `source: inbox`) + salinan file ditulis lebih dulu** ke DB/disk sebelum memanggil WhatsApp. Jika service mati mendadak di tengah kirim, job tersebut dikembalikan ke `pending` saat start dan worker mengirim ulang gambarnya. Kuota antrean tetap menghitung semua pesan keluar device, termasuk balasan manual tersebut.
 
 ---
 
@@ -363,7 +363,7 @@ Gunakan `QUEUE_DAILY_LIMIT` dan `QUEUE_HOURLY_LIMIT` yang lebih rendah saat pema
 | Job tetap `pending` | Kuota jam/24 jam penuh | Lihat statistik; tunggu atau naikkan limit |
 | Job `failed` “Nomor tidak terdaftar” | Nomor tidak punya WhatsApp | Perbaiki nomor; retry tidak akan berhasil |
 | Job `failed` “File media … tidak ditemukan” | File sementara terhapus | Enqueue ulang |
-| Job `sending` lama setelah restart | Crash saat kirim | Worker mengembalikannya ke `pending` saat start |
+| Job `sending` setelah restart | Crash saat kirim | Worker mengembalikan **semua** job `sending` ke `pending` saat start (langsung, tanpa tunggu 15 menit) |
 | Pesan terkirim dobel | Retry setelah crash tepat setelah kirim | Gunakan `ref` idempoten & pantau; batasi retry |
 | Semua job berhenti | Proses mati | Jalankan via PM2/service (lihat DEPLOY-WINDOWS.md) |
 | Media dari URL gagal | URL/internal/timeout | Pastikan URL publik; cek `MEDIA_URL_*` |

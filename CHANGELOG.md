@@ -2,6 +2,16 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [2.8.1] — 2026-11-20
+
+### Diperbaiki — Kirim gambar saat service restart mendadak
+- **Inbox sekarang tahan crash**: sebelum memanggil WhatsApp, gambar (dan media lain) dari composer disimpan lebih dulu sebagai `message_jobs` ber-status `sending` + file sementara di `MEDIA_DIR`. Jika proses mati mendadak di tengah kirim, worker memulihkan job itu saat start dan mengirim ulang dari file tersebut — caption, chat asal, pengirim, dan kutipan reply tetap terjaga. Job yang berhasil tetap ditandai `sent` seperti biasa.
+- **Pemulihan antrean tanpa tunggu 15 menit**: saat proses start, semua job `sending` langsung dikembalikan ke `pending` (deployment wajib satu proses). Sebelumnya job yang baru diklaim sebelum crash mandek sampai `claimed_at` lewat 15 menit. `tick()` tetap memakai pengecekan klaim basi agar tidak merebut job dari proses lain yang masih hidup.
+- Script `npm test` diperbaiki untuk Node 22 / Windows (`node --test "test/*.test.js"`).
+
+### 🧪 Tes
+- 3 tes regresi baru: pemulihan job gambar antrean setelah crash, pemulihan outbox gambar Inbox (termasuk kutipan & metadata), dan penulisan outbox Inbox sebelum kirim.
+
 ## [2.8.0] — 2026-11-16
 
 ### Ditambah — Kirim Kontak dari Composer

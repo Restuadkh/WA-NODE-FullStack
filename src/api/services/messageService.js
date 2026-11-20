@@ -208,7 +208,7 @@ async function storeMessage({
  * { storageFailed: true, message: null } dikembalikan — pesan tidak dianggap gagal terkirim,
  * sehingga klien tidak mengirim ulang (pesan ganda ke pelanggan).
  */
-async function sendAndStore({ device, instance, to, send, preview, attachment, userId, isAutoReply, replyTo }) {
+async function sendAndStore({ device, instance, to, send, preview, attachment, userId, isAutoReply, replyTo, chat: existingChat }) {
   const jid = toJid(to);
 
   if (isPhoneNumber(to) && !(await instance.isOnWhatsApp(jid))) {
@@ -242,7 +242,7 @@ async function sendAndStore({ device, instance, to, send, preview, attachment, u
   }
 
   try {
-    const chat = await findOrCreateChat(device, jid);
+    const chat = existingChat || (await findOrCreateChat(device, jid));
     const { message } = await storeMessage({
       device,
       chat,
