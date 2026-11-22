@@ -5,7 +5,7 @@ Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersam
 - **Backend**: Node.js ≥ 20, Express 5, Sequelize (MySQL/MariaDB), socket.io, Baileys
 - **Frontend**: React + Vite di `frontend/` (build butuh Node ≥ 20.19; hasil build disajikan backend, satu proses satu port)
 
-> Versi **2.5** — ACL per device (agent hanya melihat device yang ditugaskan), manajemen user di dashboard, URL media berkedaluwarsa, dan perbaikan webhook HMAC. Sebelumnya: antrean pesan keluar anti-ban (2.4), webhook per device (2.3), media penuh dan reconnect per sesi (2.2). **Pengguna lama: baca bagian [Upgrade dari v2.0](#upgrade-dari-v20).**
+> Versi **2.8.2** — kirim gambar tidak lagi menyebabkan service restart (validasi, resize, dan thumbnail dibuat aplikasi). Sebelumnya: outbox gambar tahan crash (2.8.1), kirim kontak & reply/edit di Inbox (2.8.0), ACL per device + manajemen user + URL media berkedaluwarsa (2.5), antrean anti-ban (2.4), webhook per device (2.3). **Pengguna lama: baca bagian [Upgrade dari v2.0](#upgrade-dari-v20).**
 
 ## Fitur
 - Login JWT, role `admin` (kelola device, tautkan QR, rule) dan `agent` (balas chat)
@@ -19,6 +19,7 @@ Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersam
 - Reconnect otomatis **per sesi** dengan backoff + jitter; satu sesi yang terputus tidak memutus/menahan sesi lain
 - Webhook keluar (opsional, dapat ditandatangani HMAC) untuk pesan masuk, **update status pesan** (terkirim/diterima/dibaca), dan status koneksi, **diatur per device** dari dashboard (fallback `WEBHOOK_URL` global)
 - **Antrean pesan keluar (anti-ban)**: kirim lewat `POST /api/message/queue` — jeda acak 8–25 detik, satu pesan sekaligus per device, kuota rolling per jam/24 jam, jam kirim, simulasi mengetik, retry backoff, dan halaman **Antrian** di dashboard. Device boleh offline saat enqueue; job tetap ada setelah restart. Panduan: **[QUEUE.md](QUEUE.md)**
+- **Kirim gambar stabil**: file divalidasi, gambar besar di-resize, dan thumbnail dibuat aplikasi agar decoder native Baileys tidak memicu lonjakan memori/restart. Panduan lengkap & env: **[MEDIA.md](MEDIA.md)**
 - **Halaman Dok API** di dashboard: ringkasan penggunaan `/api/message/*` beserta contoh request/response (detail lengkap di **[RES-API.md](RES-API.md)**)
 
 ## Instalasi
@@ -87,7 +88,7 @@ curl -X POST "https://wa.contoh.com/api/message/queue" \
 ```
 Endpoint `queue`, `queue/batch`, `queue/media`, `queue/mediaurl`; job dipantau/dibatalkan di halaman **Antrian**. Detail & batas anti-ban: **[QUEUE.md](QUEUE.md)**.
 
-**Media masuk/keluar**: file disimpan di `MEDIA_DIR` (default `src/media/`) dan disajikan lewat URL bertanda tangan HMAC dengan masa berlaku (`MEDIA_URL_EXPIRY_HOURS`, default 7 hari) — bukan folder publik terbuka. URL diperbarui otomatis setiap inbox dibuka. Metadata (MIME, nama file, ukuran, dimensi, durasi, voice note, caption) disimpan di tabel `messages`. Kolom baru dipasang otomatis saat start (dan oleh `npm run db:upgrade`); file media tidak ikut di database — backup folder `MEDIA_DIR` bersama database.
+**Media masuk/keluar**: file disimpan di `MEDIA_DIR` (default `src/media/`) dan disajikan lewat URL bertanda tangan HMAC dengan masa berlaku (`MEDIA_URL_EXPIRY_HOURS`, default 7 hari) — bukan folder publik terbuka. URL diperbarui otomatis setiap inbox dibuka. Metadata (MIME, nama file, ukuran, dimensi, durasi, voice note, caption) disimpan di tabel `messages`. Kolom baru dipasang otomatis saat start (dan oleh `npm run db:upgrade`); file media tidak ikut di database — backup folder `MEDIA_DIR` bersama database. Untuk gambar keluar, batas piksel/dimensi dan env `IMAGE_*` ada di **[MEDIA.md](MEDIA.md)**.
 
 **`/mediaurl`**: server mengunduh file sendiri (maks `MEDIA_URL_MAX_MB`, timeout `MEDIA_URL_TIMEOUT_MS`) lalu mengirimkannya. URL yang mengarah ke alamat internal/privat (loopback, 10.x, 172.16–31.x, 192.168.x, 169.254.x termasuk metadata cloud, IPv6 lokal) **ditolak** dengan HTTP 400, termasuk lewat redirect atau DNS rebinding. Batasi lebih jauh dengan `MEDIA_URL_ALLOWED_HOSTS`.
 

@@ -272,7 +272,7 @@ X-Api-Key: <instance_key>
 | Field | Tipe | Wajib | Keterangan |
 |---|---|---|---|
 | `id` | string | ya | Nomor / JID tujuan |
-| `file` | file | ya | JPG/PNG/GIF, maks 25 MB |
+| `file` | file | ya | JPG/PNG/WebP/GIF/TIFF/HEIC, maks `MEDIA_MAX_MB` (default 50 MB). Lihat **[MEDIA.md](MEDIA.md)** |
 | `caption` | string | tidak | Caption (maks 4096) |
 | `filename` | string | tidak | Nama file yang ditampilkan |
 
@@ -285,6 +285,8 @@ curl -X POST "http://localhost:3000/api/message/image" \
 ```
 
 **Response `201`**: `{ "error": false, "data": { ...WebMessageInfo } }`
+
+Gambar divalidasi dan dinormalisasi sebelum dikirim: file bukan gambar ditolak `400`, gambar > `IMAGE_RESIZE_MAX` (default 2560 px) di-resize ke JPEG, dan thumbnail dibuat aplikasi sehingga Baileys tidak memanggil decoder native. Detail, batas `IMAGE_MAX_PIXELS`, dan troubleshooting: **[MEDIA.md](MEDIA.md)**.
 
 ---
 

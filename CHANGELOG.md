@@ -2,6 +2,23 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [2.8.2] — 2026-11-22
+
+### Diperbaiki — Kirim gambar tidak menyebabkan service restart
+- **Akar masalah**: Baileys membuat thumbnail dengan `sharp`/libvips setiap kali mengirim `image`. file rusak, format tak dikenal, atau gambar resolusi ekstrem membuat decoder native bekerja tanpa batas (lonjakan memori / error libvips). Karena proses berjalan di PM2 dengan `max_memory_restart: 700M`, service ikut restart dan sesi WhatsApp terputus.
+- `sendMedia()` sekarang menyiapkan gambar di aplikasi **sebelum** diserahkan ke Baileys:
+  - menolak file yang bukan gambar (magic bytes JPEG/PNG/WebP/GIF/TIFF/HEIC) dengan HTTP 400,
+  - mengecilkan gambar > 2560 px ke JPEG kualitas 82 (batas aman: 8192 px / 40 MP),
+  - membuat `jpegThumbnail` sendiri sehingga Baileys **tidak memanggil decoder gambar** sama sekali,
+  - memutakhirkan buffer/meta objek file agar salinan di disk dan riwayat sama dengan yang terkirim.
+- `sharp` kini dependency langsung (bukan hanya optional peer Baileys), dengan fallback thumbnail placeholder bila tidak terpasang.
+- Env baru: `IMAGE_MAX_PIXELS`, `IMAGE_MAX_DIMENSION`, `IMAGE_RESIZE_MAX`, `IMAGE_JPEG_QUALITY`, `IMAGE_THUMBNAIL_SIZE` (ditambahkan ke `.env.example`).
+- Dokumentasi lengkap: **[MEDIA.md](MEDIA.md)** (alur, format, batas, error, deployment, troubleshooting), plus tautan dari `README.md`, `RES-API.md`, dan `DEPLOY-WINDOWS.md`.
+
+### 🧪 Tes
+- Tes regresi: gambar rusak ditolak, gambar 6000x6000 dikecilkan < 2560 px, thumbnail dihasilkan aplikasi, dan `content.jpegThumbnail` ikut terkirim.
+- Uji manual ke `089671533195`: JPEG 1600x1200 & PNG 6000x6000 terkirim HTTP 201, PNG 9000x9000 ditolak HTTP 400 dengan pesan jelas, PID proses tidak berubah, memori puncak ~204 MB.
+
 ## [2.8.1] — 2026-11-20
 
 ### Diperbaiki — Kirim gambar saat service restart mendadak

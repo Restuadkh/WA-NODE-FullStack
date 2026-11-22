@@ -75,9 +75,16 @@ pm2 logs wa-dashboard
 - `exec_mode: "fork"`
 - `instances: 1`
 - `autorestart: true`
+- `max_memory_restart: "700M"` — restart otomatis bila memori melebihi batas. Bila ini sering muncul saat kirim gambar, turunkan `IMAGE_RESIZE_MAX` / `IMAGE_MAX_PIXELS` (lihat **[MEDIA.md](MEDIA.md)**).
 - `kill_timeout: 20s` (agar worker antrean & socket WA sempat ditutup)
 
 **Jangan** memakai `pm2 start src/server.js -i max` atau mode cluster.
+
+Setelah mengubah env terkait gambar, restart dengan:
+
+```powershell
+pm2 restart wa-dashboard --update-env
+```
 
 ### 3.3 Simpan agar bisa dipulihkan
 

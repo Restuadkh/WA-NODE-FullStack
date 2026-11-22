@@ -44,6 +44,11 @@ const safeFetch = require("../src/utils/safeFetch");
 const { toJid, normalizePhoneDigits } = require("../src/api/whatsapp/jid");
 const { matches } = require("../src/api/services/autoReply");
 const queueService = require("../src/api/services/queueService");
+const { prepareOutgoingImage } = require("../src/api/services/outgoingMedia");
+
+// PNG 1x1 valid. Tes lama memakai string "png"/"gambar" sehingga gambar rusak lolos;
+// sekarang sendMedia memvalidasi magic bytes sebelum menyerahkan ke Baileys.
+const PNG_1X1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j///9/AAn7A/0FQ0XKAAAAAElFTkSuQmCC", "base64");
 
 let server;
 let base;
@@ -386,14 +391,17 @@ test("kirim media dari dashboard: multipart, stiker, dan voice note", async () =
     });
 
   const image = new FormData();
-  image.append("file", new Blob([Buffer.from("png")], { type: "image/png" }), "foto.png");
+  image.append("file", new Blob([PNG_1X1], { type: "image/png" }), "foto.png");
   image.append("caption", "Halo");
   const resImage = await post(image);
   assert.equal(resImage.status, 201);
   const imageBody = await resImage.json();
   assert.equal(imageBody.data.type, "image");
   assert.ok(imageBody.data.media_url);
-  assert.equal(sent.at(-1).content.image.toString(), "png");
+  assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
+  assert.ok(Buffer.isBuffer(sent.at(-1).content.jpegThumbnail), "thumbnail disiapkan aplikasi, bukan Baileys");
+  assert.equal(sent.at(-1).content.width, 1);
+  assert.equal(sent.at(-1).content.height, 1);
   assert.equal(sent.at(-1).content.caption, "Halo");
 
   const sticker = new FormData();
@@ -412,6 +420,28 @@ test("kirim media dari dashboard: multipart, stiker, dan voice note", async () =
   assert.equal(noteData.type, "audio");
   assert.equal(noteData.media_ptt, true);
   assert.equal(sent.at(-1).content.ptt, true);
+});
+
+test("gambar keluar: file rusak ditolak, gambar besar dikecilkan, thumbnail dibuat sendiri", async () => {
+  await assert.rejects(
+    () => prepareOutgoingImage({ buffer: Buffer.from("bukan-gambar"), mimetype: "image/png" }),
+    (err) => err.statusCode === 400 && /bukan gambar/i.test(err.message),
+  );
+
+  const small = { buffer: PNG_1X1, mimetype: "image/png" };
+  await prepareOutgoingImage(small);
+  assert.equal(small.width, 1);
+  assert.equal(small.height, 1);
+  assert.ok(Buffer.isBuffer(small.jpegThumbnail), "thumbnail dikirim ke Baileys");
+
+  const sharp = require("sharp");
+  const huge = await sharp({ create: { width: 6000, height: 6000, channels: 3, background: "#ffffff" } })
+    .png()
+    .toBuffer();
+  const resized = { buffer: huge, mimetype: "image/png" };
+  await prepareOutgoingImage(resized);
+  assert.equal(resized.mimetype, "image/jpeg");
+  assert.ok(resized.width <= 2560 && resized.height <= 2560, `ukuran akhir ${resized.width}x${resized.height}`);
 });
 
 test("daftar chat, riwayat pesan (terbaru, urut naik), tandai dibaca", async () => {
@@ -805,7 +835,7 @@ test("broadcast media: antrean berisi payload media per kontak", async () => {
   const form = new FormData();
   form.append("text", "Katalog {{nama}}");
   form.append("contact_ids", JSON.stringify([]));
-  form.append("file", new Blob([Buffer.from("gambar-biner")], { type: "image/png" }), "katalog.png");
+  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "katalog.png");
 
   const res = await fetch(`${base}/api/devices/${device.id}/contacts/broadcast`, {
     method: "POST",
@@ -931,18 +961,18 @@ test("gateway API: key, normalisasi nomor, nomor tidak terdaftar, device offline
 
   const originalFetch = safeFetch.fetchRemoteMedia;
   safeFetch.fetchRemoteMedia = async () => ({
-    buffer: Buffer.from("gambar"),
-    mimetype: "image/jpeg",
-    filename: "a.jpg",
+    buffer: PNG_1X1,
+    mimetype: "image/png",
+    filename: "a.png",
   });
   let media;
   try {
-    media = await post("mediaurl", { id: "0811222333", type: "image", url: "https://x.id/a.jpg", mimetype: "image/jpeg", caption: "Bukti" });
+    media = await post("mediaurl", { id: "0811222333", type: "image", url: "https://x.id/a.png", mimetype: "image/png", caption: "Bukti" });
   } finally {
     safeFetch.fetchRemoteMedia = originalFetch;
   }
   assert.equal(media.status, 201);
-  assert.equal(Buffer.from(sent.at(-1).content.image).toString(), "gambar");
+  assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
   assert.equal(sent.at(-1).content.caption, "Bukti");
 
   const latest = await Message.findOne({ order: [["createdAt", "DESC"]] });
@@ -954,7 +984,7 @@ test("gateway API: key, normalisasi nomor, nomor tidak terdaftar, device offline
     mediaStore.verify(mediaDevice, diskFile, new URLSearchParams(query).get("t"), new URLSearchParams(query).get("e")),
     true,
   );
-  assert.equal(latest.media_mimetype, "image/jpeg");
+  assert.equal(latest.media_mimetype, "image/png");
 
   instance.status = "disconnected";
   assert.equal((await post("text", { id: "0811222333", message: "x" })).status, 409);
@@ -1041,7 +1071,7 @@ test("antrean media: file disimpan sementara, dikirim, lalu dibersihkan", async 
   form.append("id", "0811222666");
   form.append("type", "image");
   form.append("caption", "Dari antrean");
-  form.append("file", new Blob([Buffer.from("antrean-img")], { type: "image/png" }), "antrean.png");
+  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "antrean.png");
 
   const res = await fetch(`${base}/api/message/queue/media?key=${device.instance_key}`, {
     method: "POST",
@@ -1058,7 +1088,7 @@ test("antrean media: file disimpan sementara, dikirim, lalu dibersihkan", async 
   await job.reload();
   assert.equal(job.status, "sent");
   assert.equal(mediaStore.resolve(device.id, job.payload.media.disk_name), null, "file sementara dihapus");
-  assert.equal(Buffer.from(sent.at(-1).content.image).toString(), "antrean-img");
+  assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
   assert.equal(sent.at(-1).content.caption, "Dari antrean");
 });
 
@@ -1067,7 +1097,7 @@ test("restart mendadak: job gambar antrean yang baru diklaim langsung pulih saat
   form.append("id", "0811222888");
   form.append("type", "image");
   form.append("caption", "Setelah restart");
-  form.append("file", new Blob([Buffer.from("restart-img")], { type: "image/png" }), "restart.png");
+  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "restart.png");
 
   const res = await fetch(`${base}/api/message/queue/media?key=${device.instance_key}`, {
     method: "POST",
@@ -1092,7 +1122,7 @@ test("restart mendadak: job gambar antrean yang baru diklaim langsung pulih saat
     await drainQueue(10);
     await job.reload();
     assert.equal(job.status, "sent");
-    assert.equal(Buffer.from(sent.at(-1).content.image).toString(), "restart-img");
+    assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
     assert.equal(sent.at(-1).content.caption, "Setelah restart");
   } finally {
     instance.status = "connected";
@@ -1116,7 +1146,7 @@ test("restart mendadak saat kirim gambar Inbox: outbox dipulihkan worker", async
     chatId: chat.id,
     replyTo: null,
     quoted: { key: { remoteJid: jid, id: "QUOTED1", fromMe: false }, message: { conversation: "kutipan" } },
-    mediaBuffer: Buffer.from("inbox-restart-img"),
+    mediaBuffer: PNG_1X1,
     mimetype: "image/png",
     filename: "inbox.png",
   });
@@ -1131,7 +1161,7 @@ test("restart mendadak saat kirim gambar Inbox: outbox dipulihkan worker", async
     await staged.reload();
     assert.equal(staged.status, "sent");
     assert.equal(mediaStore.resolve(device.id, staged.payload.media.disk_name), null, "file sementara dibersihkan");
-    assert.equal(Buffer.from(sent.at(-1).content.image).toString(), "inbox-restart-img");
+    assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
     assert.equal(sent.at(-1).opts.quoted.key.id, "QUOTED1", "kutipan asal ikut dipulihkan");
 
     const saved = await Message.findByPk(staged.message_id);
@@ -1151,7 +1181,7 @@ test("Inbox: gambar ditulis sebagai outbox lebih dulu, lalu ditutup saat terkiri
   const before = await MessageJob.count({ where: { source: "inbox" } });
 
   const form = new FormData();
-  form.append("file", new Blob([Buffer.from("inbox-live")], { type: "image/png" }), "live.png");
+  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "live.png");
   form.append("caption", "Langsung");
   const res = await fetch(`${base}/api/chats/${chat.id}/messages`, {
     method: "POST",

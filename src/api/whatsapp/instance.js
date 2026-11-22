@@ -10,6 +10,7 @@ const {
 } = require("@whiskeysockets/baileys");
 const config = require("../../config/config");
 const logger = require("../services/logger");
+const { prepareOutgoingImage } = require("../services/outgoingMedia");
 const { loadAuthState, removeAuthState } = require("./authStore");
 const { phoneFromJid } = require("./jid");
 
@@ -519,12 +520,24 @@ class WhatsAppInstance extends EventEmitter {
    * Kirim media. `type`: image | video | audio | sticker | document.
    * Opsi: { ptt (audio voice note), seconds, width, height, gifPlayback }
    */
-  sendMedia(jid, { buffer, mimetype, filename, seconds, width, height }, type, caption = "", opts = {}) {
+  async sendMedia(jid, file, type, caption = "", opts = {}) {
     // Validasi dini: buffer kosong atau type tidak dikenal jangan sampai sampai ke Baileys
     // (error aneh dari Baileys bisa mematikan proses). Lebih baik 400 ke pemanggil.
     const KNOWN = ["image", "video", "audio", "sticker", "document"];
-    if (!Buffer.isBuffer(buffer) || !buffer.length) throw httpError400("File media kosong/tidak terbaca");
+    if (!file || !Buffer.isBuffer(file.buffer) || !file.buffer.length) {
+      throw httpError400("File media kosong/tidak terbaca");
+    }
     if (!KNOWN.includes(type)) throw httpError400(`Jenis media tidak dikenal: ${type}`);
+
+    const {
+      buffer,
+      mimetype,
+      filename,
+      seconds,
+      width,
+      height,
+    } = type === "image" ? await prepareOutgoingImage(file) : file;
+
     const content = {};
     if (type === "sticker") {
       content.sticker = buffer;
@@ -550,6 +563,9 @@ class WhatsAppInstance extends EventEmitter {
       }
       if (width) content.width = Number(width);
       if (height) content.height = Number(height);
+      // Thumbnail buatan sendiri -> Baileys melewati extractImageThumb()/sharp-nya.
+      // Ini mencegah native decoder dipanggil dua kali dan mencegah crash pada gambar ekstrem.
+      if (file.jpegThumbnail) content.jpegThumbnail = file.jpegThumbnail;
     }
     return this._ensureOnline().sendMessage(jid, content, buildSendOpts(opts));
   }

@@ -93,6 +93,16 @@ module.exports = {
     tokenSecret: process.env.MEDIA_TOKEN_SECRET || process.env.JWT_SECRET || "",
     // Masa berlaku URL media (jam). URL diperbarui otomatis setiap kali inbox dibuka.
     urlExpiryMs: int(process.env.MEDIA_URL_EXPIRY_HOURS, 168) * 60 * 60 * 1000,
+    // Normalisasi gambar keluar SEBELUM diserahkan ke Baileys. Baileys membuat thumbnail
+    // dengan sharp/libvips; gambar rusak atau resolusi ekstrem bisa membuat native library
+    // menghabiskan memori besar / crash. Kita batasi di sini dan kirim thumbnail sendiri.
+    outgoingImage: {
+      maxPixels: int(process.env.IMAGE_MAX_PIXELS, 40_000_000),
+      maxDimension: int(process.env.IMAGE_MAX_DIMENSION, 8192),
+      resizeMax: int(process.env.IMAGE_RESIZE_MAX, 2560),
+      quality: int(process.env.IMAGE_JPEG_QUALITY, 82),
+      thumbnailSize: int(process.env.IMAGE_THUMBNAIL_SIZE, 40),
+    },
   },
 
   autoReply: {
