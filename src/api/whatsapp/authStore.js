@@ -66,6 +66,7 @@ async function markLoggedOut(base) {
 async function resetToFreshDir(base) {
   const fresh = path.join(authRoot, `${path.basename(base)}--${Date.now()}`);
   await fs.promises.mkdir(base, { recursive: true });
+  await fs.promises.unlink(path.join(base, LOGOUT_MARKER)).catch(() => {});
   await fs.promises.writeFile(await pointerPath(base), path.relative(authRoot, fresh));
   return fresh;
 }
@@ -84,6 +85,9 @@ async function loadAuthState(key) {
   if (await exists(marker)) {
     await fs.promises.unlink(marker).catch(() => {});
     await removeAuthState(key);
+    // removeAuthState bisa menulis ulang marker bila folder tetap terkunci.
+    // Buang lagi sebelum memakai folder baru agar tidak loop reset.
+    await fs.promises.unlink(marker).catch(() => {});
     return useMultiFileAuthState(await resetToFreshDir(base));
   }
 

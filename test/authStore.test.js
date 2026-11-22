@@ -29,6 +29,10 @@ test("removeAuthState aman dipanggil dua kali dan untuk folder yang sudah hilang
 
   // Tidak boleh melempar walaupun folder sudah tidak ada.
   assert.equal(await removeAuthState(key), true);
+
+  // Setelah logout, start() harus mendapat state baru (belum terdaftar) agar QR bisa dibuat.
+  const { state } = await loadAuthState(key);
+  assert.equal(state.creds.registered, false);
 });
 
 test("marker logout mencegah kredensial lama dipakai lagi", async () => {
