@@ -159,6 +159,8 @@ test("device: hak akses, pembuatan, dan penyembunyian instance_key", async () =>
   const created = await call("POST", "/api/devices", { token: adminToken, body: { name: "CS Utama", phone_number: "0812-111" } });
   assert.equal(created.status, 201);
   assert.ok(created.body.data.instance_key);
+  const duplicate = await call("POST", "/api/devices", { token: adminToken, body: { name: "CS Duplikat", phone_number: "0812-111" } });
+  assert.equal(duplicate.status, 409, "nomor WhatsApp tidak boleh dipakai dua device");
   device = await Device.findByPk(created.body.data.id);
 
   // ACL: agent ditugaskan ke device ini agar bisa melihat chat-nya.

@@ -7,6 +7,7 @@ const manager = require("../whatsapp/manager");
 const mediaStore = require("../services/mediaStore");
 const logger = require("../services/logger");
 const { assertDeviceAccess, allowedDeviceIds } = require("../services/deviceAccess");
+const { normalizePhoneDigits } = require("../whatsapp/jid");
 
 const httpError = require("../services/httpError");
 
@@ -88,9 +89,18 @@ async function listDevices(req, res) {
 
 async function createDevice(req, res) {
   const name = String(req.body?.name || "").trim();
-  const phone = String(req.body?.phone_number || "").replace(/\D/g, "");
+  const phone = normalizePhoneDigits(req.body?.phone_number || "");
   if (!name) throw httpError("Nama device wajib diisi", 400);
   if (name.length > 100) throw httpError("Nama device terlalu panjang", 400);
+
+  if (phone) {
+    const duplicate = await Device.findOne({
+      where: { phone_number: phone, status: { [Op.in]: ["connected", "pending_qr"] } },
+    });
+    if (duplicate) {
+      throw httpError(`Nomor ${phone} sudah dipakai device "${duplicate.name}"`, 409);
+    }
+  }
 
   const device = await Device.create({
     name,

@@ -2,6 +2,18 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [2.8.3] — 2026-11-22
+
+### Diperbaiki — `EPERM: operation not permitted, unlink ... app-state-sync-key-*.json`
+- Penyebabnya: **dua device memakai nomor WhatsApp yang sama** (`TEST` dan `test2`, keduanya `6285172020817`). WhatsApp memutus sesi dengan `401 Connection Failure`, aplikasi lalu menghapus folder auth saat Baileys masih menulis file `app-state-sync-key`, dan Windows/Defender menolak `unlink` (`EPERM`).
+- `removeAuthState()` sekarang **serial, idempoten, dan tidak pernah melempar**: retry untuk `EPERM/EBUSY/ENOTEMPTY/EACCES`, fallback pindah folder, lalu marker `.logged-out` bila tetap terkunci. Kredensial lama tidak dipakai lagi saat sesi dicoba ulang.
+- `restoreAll()` melewati device dengan nomor ganda dan memilih satu sesi aktif; `POST /api/devices` menolak nomor duplikat dengan HTTP `409`.
+- Panduan troubleshooting ditambahkan ke **[DEPLOY-WINDOWS.md](DEPLOY-WINDOWS.md)**.
+
+### 🧪 Tes
+- Tes regresi baru: penghapusan sesi dipanggil bersamaan, marker logout, dan `listStoredKeys` melewati folder ber-marker.
+- `npm test`: 42 lolos, 2 gagal baseline yang sudah ada sebelumnya (webhook HMAC & manajemen user).
+
 ## [2.8.2] — 2026-11-22
 
 ### Diperbaiki — Kirim gambar tidak menyebabkan service restart

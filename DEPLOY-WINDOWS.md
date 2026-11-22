@@ -230,6 +230,18 @@ Kekurangan: tidak ada manajemen proses/log semudah PM2, dan restart saat crash b
 - Reconnect dijadwalkan **per instance** dengan timer terpisah, backoff, dan jitter.
 - Restore saat startup di-stagger 150 ms agar satu sesi tidak menahan sesi lain.
 - `connectionReplaced` **tidak** di-reconnect otomatis. Ini disengaja: artinya sesi yang sama dibuka di tempat lain. Logout/tautkan ulang secara sadar, dan pastikan tidak ada proses kedua.
+- **Satu nomor = satu device.** `POST /api/devices` menolak nomor yang sudah dipakai device lain (HTTP `409`). Saat startup, device duplikat dilewati supaya tidak saling menendang dengan `401`/`440`.
+
+### Error `EPERM: operation not permitted, unlink ... app-state-sync-key-*.json`
+
+Biasanya muncul bersama `code: 401, reason: "Connection Failure"`. Artinya WhatsApp men-logout sesi (sering karena nomor yang sama dipakai dua device/proses), lalu aplikasi menghapus folder `src/auth/<instance_key>` sementara Baileys masih menulis file kunci. Windows/Defender sesekali mengunci file sehingga `unlink` gagal.
+
+Sejak v2.8.3 penghapusan sesi di-retry, dibuat serial, dan tidak lagi menggagalkan `connection.update`. Yang perlu dilakukan:
+
+1. Buka halaman **Device**, hapus device duplikat (atau ganti nomornya). Contoh kasus: `TEST` dan `test2` sama-sama memakai `6285172020817`.
+2. Pastikan hanya satu proses yang berjalan: `pm2 status`, lalu hentikan `npm start` yang masih terbuka.
+3. Restart agar device duplikat tidak dipulihkan: `pm2 restart wa-dashboard --update-env`.
+4. Tautkan ulang device yang tertaut (jika statusnya `logged_out`). Folder auth lama yang terkunci ditandai `.logged-out` dan tidak dipakai lagi.
 
 ---
 

@@ -6,6 +6,7 @@ const { notify } = require("../services/webhook");
 const { handleIncoming, handleStatusUpdates } = require("../services/messageHandler");
 const { WhatsAppInstance } = require("./instance");
 const { listStoredKeys } = require("./authStore");
+const { normalizePhoneDigits } = require("./jid");
 
 // instance_key -> WhatsAppInstance (hidup di memori proses ini).
 // Karena itu aplikasi ini harus berjalan sebagai SATU proses (PM2 fork mode, bukan cluster).
@@ -105,12 +106,35 @@ async function restoreAll() {
   await adoptLegacySessions();
   const devices = await Device.findAll({
     where: { status: { [Op.in]: ["connected", "disconnected"] } },
-    order: [["last_connected_at", "DESC"]],
+    order: [
+      ["status", "ASC"], // "connected" lebih dulu daripada "disconnected"
+      ["last_connected_at", "DESC"],
+    ],
   });
-  logger.info(`Memulihkan ${devices.length} sesi WhatsApp`);
+
+  // Satu nomor WhatsApp hanya boleh dibuka oleh satu sesi. Kalau ada device
+  // duplikat, WhatsApp akan saling menendang (401/440) dan folder auth ikut
+  // terkunci saat dihapus (EPERM di Windows).
+  const seenPhones = new Set();
+  const active = [];
+  for (const device of devices) {
+    const phone = normalizePhoneDigits(device.phone_number);
+    if (phone && seenPhones.has(phone)) {
+      logger.warn(
+        { device: device.id, name: device.name, phone },
+        "Device dengan nomor ganda dilewati saat restore; hapus/ubah nomor device duplikat",
+      );
+      await device.update({ status: "disconnected" }).catch(() => {});
+      continue;
+    }
+    if (phone) seenPhones.add(phone);
+    active.push(device);
+  }
+
+  logger.info(`Memulihkan ${active.length} sesi WhatsApp`);
 
   const results = await Promise.allSettled(
-    devices.map(
+    active.map(
       (device, index) =>
         new Promise((resolve) => setTimeout(resolve, index * 150)).then(() =>
           shuttingDown ? null : ensure(device),
@@ -120,12 +144,12 @@ async function restoreAll() {
   results.forEach((result, index) => {
     if (result.status === "rejected") {
       logger.error(
-        { err: result.reason, device: devices[index].id },
+        { err: result.reason, device: active[index].id },
         "Gagal memulihkan sesi WhatsApp",
       );
     }
   });
-  return devices.length;
+  return active.length;
 }
 
 async function stopAll() {

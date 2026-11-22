@@ -5,7 +5,7 @@ Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersam
 - **Backend**: Node.js ≥ 20, Express 5, Sequelize (MySQL/MariaDB), socket.io, Baileys
 - **Frontend**: React + Vite di `frontend/` (build butuh Node ≥ 20.19; hasil build disajikan backend, satu proses satu port)
 
-> Versi **2.8.2** — kirim gambar tidak lagi menyebabkan service restart (validasi, resize, dan thumbnail dibuat aplikasi). Sebelumnya: outbox gambar tahan crash (2.8.1), kirim kontak & reply/edit di Inbox (2.8.0), ACL per device + manajemen user + URL media berkedaluwarsa (2.5), antrean anti-ban (2.4), webhook per device (2.3). **Pengguna lama: baca bagian [Upgrade dari v2.0](#upgrade-dari-v20).**
+> Versi **2.8.3** — sesi WhatsApp tahan `EPERM` saat Windows menghapus folder auth, dan nomor duplikat kini diblokir. Sebelumnya: kirim gambar stabil (2.8.2), outbox gambar tahan crash (2.8.1), kirim kontak & reply/edit di Inbox (2.8.0), ACL per device + manajemen user + URL media berkedaluwarsa (2.5), antrean anti-ban (2.4), webhook per device (2.3). **Pengguna lama: baca bagian [Upgrade dari v2.0](#upgrade-dari-v20).**
 
 ## Fitur
 - Login JWT, role `admin` (kelola device, tautkan QR, rule) dan `agent` (balas chat)
