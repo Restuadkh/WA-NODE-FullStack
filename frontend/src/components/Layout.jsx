@@ -68,19 +68,7 @@ export default function Layout() {
             <Icon d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM12 18h.01" />
             <span>Devices</span>
           </NavLink>
-          <NavLink to="/contacts" aria-label="Kontak" title="Kontak" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Icon d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 8l-5 4-2-2" />
-            <span>Kontak</span>
-          </NavLink>
-          <NavLink to="/queue" aria-label="Antrian" title="Antrian" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Icon d="M12 6v6l4 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-            <span>Antrian</span>
-          </NavLink>
-          <NavLink to="/rules" aria-label="Auto-reply" title="Auto-reply" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Icon d="M13 2L3 14h8l-1 8 10-12h-8z" />
-            <span>Auto-reply</span>
-          </NavLink>
-          {(user?.role === "admin" || user?.role === "super_admin") && (
+          {user?.role === "admin" && (
             <NavLink to="/users" aria-label="Pengguna" title="Pengguna" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <Icon d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
               <span>Pengguna</span>

@@ -1,12 +1,12 @@
-const { randomUUID, timingSafeEqual } = require("crypto");
+const { randomUUID } = require("crypto");
 const sequelize = require("../../config/database");
 const { Op } = require("sequelize");
 const config = require("../../config/config");
-const { Device, Chat, Message, AutoReplyRule, MessageJob, DeviceAgent } = require("../models");
+const { Device, Chat, Message, ContactName } = require("../models");
 const manager = require("../whatsapp/manager");
 const mediaStore = require("../services/mediaStore");
 const logger = require("../services/logger");
-const { assertDeviceAccess, allowedDeviceIds } = require("../services/deviceAccess");
+const { assertDeviceAccess } = require("../services/deviceAccess");
 const { normalizePhoneDigits } = require("../whatsapp/jid");
 
 const httpError = require("../services/httpError");
@@ -19,7 +19,7 @@ const WEBHOOK_SECRET_MAX = 255;
 function serialize(device, user) {
   const data = device.toJSON();
   data.webhook_configured = !!device.webhook_url;
-  if (user?.role !== "admin" && user?.role !== "super_admin") {
+  if (user?.role !== "admin") {
     delete data.instance_key;
     delete data.webhook_url;
     delete data.webhook_secret;
@@ -78,12 +78,7 @@ function startInBackground(device, opts = {}) {
 }
 
 async function listDevices(req, res) {
-  // ACL: agent hanya melihat device yang ditugaskan kepadanya.
-  const allowed = await allowedDeviceIds(req.user);
-  const devices = await Device.findAll({
-    where: allowed ? { id: { [Op.in]: allowed } } : undefined,
-    order: [["createdAt", "DESC"]],
-  });
+  const devices = await Device.findAll({ order: [["createdAt", "DESC"]] });
   res.json({ error: false, data: devices.map((d) => serialize(d, req.user)) });
 }
 
@@ -109,11 +104,6 @@ async function createDevice(req, res) {
     status: "pending_qr",
     ...webhookPatch(req.body || {}),
   });
-  // Admin dengan penugasan device otomatis mengelola device yang ia buat
-  // (super_admin tidak memerlukan penugasan — aksesnya penuh).
-  const allowed = await allowedDeviceIds(req.user);
-  if (allowed) await DeviceAgent.create({ user_id: req.user.id, device_id: device.id });
-  require("../services/deviceAccess").invalidateDeviceAccess(req.user.id); // cache ACL segera
   startInBackground(device);
   res.status(201).json({ error: false, data: serialize(device, req.user) });
 }
@@ -157,7 +147,6 @@ async function getDeviceQr(req, res) {
     data: {
       status: instance?.status || device.status,
       qr: instance?.qr || null,
-      pairing_code: instance?.pairingCode || null,
       // Sesi retry terbatas (null = tidak sedang mencoba / sudah berhenti)
       attempts: instance?.info().bounded ?? null,
     },
@@ -185,48 +174,6 @@ async function redialDevice(req, res) {
   res.json({ error: false, message: "Redial dijalankan untuk device ini", data: { device_id: device.id, status: "disconnected" } });
 }
 
-// Redial via crontab/task scheduler tanpa JWT: autentikasi lewat CRON_SECRET.
-// Semua device offline/disconnected di-start ulang; device yang online tidak disentuh,
-// sehingga cron bisa dijalankan berkala tanpa memutus koneksi yang sehat.
-async function cronRedial(req, res) {
-  const secret = config.cron.secret;
-  if (!secret) throw httpError("Endpoint cron tidak aktif (isi CRON_SECRET di .env)", 404);
-
-  const provided = String(req.query.token ?? req.body?.token ?? "");
-  const ok =
-    provided.length === secret.length &&
-    timingSafeEqual(Buffer.from(provided), Buffer.from(secret));
-  if (!ok) throw httpError("Token cron tidak valid", 401);
-
-  // Redial satu device tertentu: ?key=<instance_key> atau ?id=<device_id>
-  let targets;
-  if (req.query.key) {
-    targets = await Device.findAll({ where: { instance_key: String(req.query.key) } });
-  } else if (req.query.id) {
-    targets = (await findDevice(req.query.id)) ? [await Device.findByPk(req.query.id)] : [];
-  } else {
-    // Semua device yang pernah tertaut kecuali yang sedang online.
-    targets = await Device.findAll({
-      where: { status: { [Op.ne]: "connected" } },
-      order: [["last_connected_at", "DESC"]],
-    });
-  }
-
-  const results = [];
-  for (const device of targets) {
-    try {
-      // Jeda kecil antar device agar tidak menumpuk transaksi koneksi bersamaan.
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      await manager.redial(device);
-      results.push({ device_id: device.id, name: device.name, ok: true });
-    } catch (err) {
-      logger.error({ err, device: device.id }, "Gagal redial device lewat cron");
-      results.push({ device_id: device.id, name: device.name, ok: false, error: err.message });
-    }
-  }
-  res.json({ error: false, data: { count: results.length, results } });
-}
-
 async function removeDevice(req, res) {
   const device = await findDevice(req.params.id);
   await assertDeviceAccess(req.user, device.id);
@@ -238,13 +185,9 @@ async function removeDevice(req, res) {
     ).map((c) => c.id);
     if (chatIds.length) await Message.destroy({ where: { chat_id: chatIds }, transaction: t });
     await Chat.destroy({ where: { device_id: device.id }, transaction: t });
-    await AutoReplyRule.destroy({ where: { device_id: device.id }, transaction: t });
-    await MessageJob.destroy({ where: { device_id: device.id }, transaction: t });
-    await DeviceAgent.destroy({ where: { device_id: device.id }, transaction: t });
+    await ContactName.destroy({ where: { device_id: device.id }, transaction: t });
     await device.destroy({ transaction: t });
   });
-  // Cache ACL semua user ikut segar (device hilang dari daftar penugasan).
-  require("../services/deviceAccess").invalidateAllDeviceAccess();
   // File media di disk dihapus setelah DB berhasil (gagal hapus file tidak fatal).
   await mediaStore.removeDeviceMedia(device.id);
 
@@ -259,7 +202,6 @@ module.exports = {
   getDeviceStatus,
   removeDevice,
   redialDevice,
-  cronRedial,
   findDevice,
   httpError,
 };

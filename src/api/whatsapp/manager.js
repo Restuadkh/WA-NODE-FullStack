@@ -16,7 +16,6 @@ let shuttingDown = false;
 function create(device) {
   const instance = new WhatsAppInstance({
     key: device.instance_key,
-    phoneNumber: device.phone_number,
   });
   // Referensi device terbaru (bisa diganti lewat refreshDevice saat admin mengubah webhook/nama).
   instance.device = device;

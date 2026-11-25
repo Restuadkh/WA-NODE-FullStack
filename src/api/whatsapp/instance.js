@@ -10,7 +10,6 @@ const {
 } = require("@whiskeysockets/baileys");
 const config = require("../../config/config");
 const logger = require("../services/logger");
-const { prepareOutgoingImage } = require("../services/outgoingMedia");
 const { loadAuthState, removeAuthState } = require("./authStore");
 const { phoneFromJid } = require("./jid");
 
@@ -64,17 +63,15 @@ async function resolveVersion() {
  *   "message.update" (updates[])              perubahan status pesan (delivered/read)
  */
 class WhatsAppInstance extends EventEmitter {
-  constructor({ key, phoneNumber }) {
+  constructor({ key }) {
     super();
     this.key = key;
-    this.phoneNumber = phoneNumber ? String(phoneNumber).replace(/\D/g, "") : undefined;
 
     this.sock = null;
     this.authState = null;
     this.status = "disconnected";
     this.phone = null;
     this.qr = null; // data URL PNG
-    this.pairingCode = null;
 
     this.stopped = false;
     this.starting = null;
@@ -83,7 +80,6 @@ class WhatsAppInstance extends EventEmitter {
     this.reconnectAttempts = 0;
     this.watchdog = null; // interval "healing" escrow: menghidupkan ulang reconnect yang mati
     this.replaced = false; // sesi digantikan koneksi lain (connectionReplaced) -> tidak di-heal otomatis
-    this.pairingRequested = false;
     // Sesi start TERBATAS (mis. dari tombol Tautkan / endpoint QR): retry otomatis
     // dibatasi N percobaan, setelah itu berhenti total sampai pengguna mencoba lagi.
     this.bounded = null; // { max, count } | null
@@ -205,7 +201,6 @@ class WhatsAppInstance extends EventEmitter {
     // stop()/logout() dipanggil selama menunggu auth/versi
     if (this.stopped || generation !== this.generation) return;
 
-    this.pairingRequested = false;
     this.replaced = false; // start manual (tombol Tautkan) boleh mencoba lagi walau sempat digantikan
     const sock = makeWASocket(options);
     this.sock = sock;
@@ -240,7 +235,6 @@ class WhatsAppInstance extends EventEmitter {
     if (connection === "open") {
       this.reconnectAttempts = 0;
       this.qr = null;
-      this.pairingCode = null;
       this.bounded = null; // koneksi sukses: sesi start terbatas selesai
       this.phone = phoneFromJid(sock.user?.id);
       this._setStatus("connected");
@@ -250,21 +244,6 @@ class WhatsAppInstance extends EventEmitter {
   }
 
   async _onQr(sock, qr) {
-    if (this.phoneNumber) {
-      // Mode pairing code (tanpa scan QR). WhatsApp mengirim event QR berulang (~20 detik);
-      // kode hanya diminta SEKALI per socket supaya tidak berganti saat pengguna mengetik
-      // dan tidak memicu rate limit.
-      if (this.pairingRequested) return;
-      this.pairingRequested = true;
-      try {
-        this.pairingCode = await sock.requestPairingCode(this.phoneNumber);
-        logger.info({ key: this.key }, "Pairing code dibuat");
-      } catch (err) {
-        logger.warn({ err: err.message, key: this.key }, "Pairing code gagal, beralih ke QR");
-        this.phoneNumber = undefined;
-      }
-      if (this.pairingCode) return this._setStatus("pending_qr");
-    }
     this.qr = await QRCode.toDataURL(qr, { margin: 1, width: 320 });
     this._setStatus("pending_qr");
   }
@@ -276,7 +255,6 @@ class WhatsAppInstance extends EventEmitter {
     logger.info({ key: this.key, code, reason: error?.message?.slice(0, 200) }, "Koneksi WhatsApp terputus");
     this._closeSocket();
     this.qr = null;
-    this.pairingCode = null;
 
     if (this.stopped) return;
 
@@ -536,7 +514,7 @@ class WhatsAppInstance extends EventEmitter {
       seconds,
       width,
       height,
-    } = type === "image" ? await prepareOutgoingImage(file) : file;
+    } = file;
 
     const content = {};
     if (type === "sticker") {
@@ -588,7 +566,6 @@ class WhatsAppInstance extends EventEmitter {
       status: this.status,
       phone: this.phone,
       has_qr: !!this.qr,
-      has_pairing_code: !!this.pairingCode,
       // Sesi start terbatas aktif: { attempts_used, attempts_max } — null bila tidak ada.
       bounded: this.bounded ? { attempts_used: this.bounded.count, attempts_max: this.bounded.max } : null,
       // Bila sesi terbatas baru gagal: berapa lama lagi endpoint QR boleh mulai sesi baru.

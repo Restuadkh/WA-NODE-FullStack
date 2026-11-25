@@ -15,10 +15,6 @@ const list = (value, fallback = []) =>
 
 const env = process.env.NODE_ENV || "development";
 
-// Kompatibel dengan konfigurasi lama: MYSQL_ENABLED=true berarti kredensial WA disimpan di MySQL.
-const authStore =
-  process.env.AUTH_STORE || (bool(process.env.MYSQL_ENABLED) ? "mysql" : "file");
-
 module.exports = {
   env,
   isProduction: env === "production",
@@ -46,28 +42,18 @@ module.exports = {
   whatsapp: {
     // false = jalankan API/dashboard tanpa membuka koneksi WhatsApp (development / test)
     enabled: bool(process.env.WHATSAPP_ENABLED, true),
-    authStore, // "file" | "mysql"
     authDir: process.env.AUTH_DIR || path.join(__dirname, "../auth"),
     restoreOnStartup: bool(process.env.RESTORE_SESSIONS_ON_START_UP, true),
     markMessagesRead: bool(process.env.MARK_MESSAGES_READ),
-    // Mode senyap: false = membuka chat di dashboard TIDAK mengirim "terbaca" (centang biru)
-    // ke WhatsApp — proyek jalan di belakang layar tanpa terlihat membaca. Badge lokal tetap
-    // dibersihkan. Set via env SEND_READ_RECEIPTS=false.
+    // false = membuka chat di dashboard TIDAK mengirim "terbaca" (centang biru).
     sendReadReceipts: bool(process.env.SEND_READ_RECEIPTS, true),
     defaultCountryCode: process.env.DEFAULT_COUNTRY_CODE ?? "62",
     // Penjadwalan koneksi ulang per instance. 0 = percobaan tanpa batas.
     reconnectBaseDelayMs: int(process.env.WA_RECONNECT_BASE_MS, 1000),
     reconnectMaxDelayMs: int(process.env.WA_RECONNECT_MAX_MS, 5 * 60 * 1000),
     reconnectMaxAttempts: int(process.env.WA_RECONNECT_MAX_ATTEMPTS, 0),
-    // Sesi start dari endpoint QR / tombol Tautkan: retry otomatis dibatasi N percobaan
-    // (0 = perilaku lama, tanpa batas). Setelah N gagal, berhenti sampai dicoba lagi.
+    // Sesi start dari endpoint QR: retry otomatis dibatasi N percobaan (0 = tanpa batas).
     qrStartMaxAttempts: int(process.env.DEVICE_QR_START_ATTEMPTS, 3),
-  },
-
-  // Endpoint redial otomatis (/api/cron/*) untuk dihit dari crontab/task scheduler.
-  // Kosong = endpoint dinonaktifkan (404).
-  cron: {
-    secret: process.env.CRON_SECRET || "",
   },
 
   gatewayApi: {
@@ -79,13 +65,8 @@ module.exports = {
     rateLimitPerMinute: int(process.env.GATEWAY_RATE_LIMIT_PER_MINUTE, 120),
   },
 
-  // Unduhan media dari URL (endpoint /api/message/mediaurl)
+  // Penyimpanan media masuk/keluar (gambar, video, stiker, audio, dokumen)
   media: {
-    maxBytes: int(process.env.MEDIA_URL_MAX_MB, 25) * 1024 * 1024,
-    timeoutMs: int(process.env.MEDIA_URL_TIMEOUT_MS, 15000),
-    // Kosong = semua host publik boleh. Isi bila ingin membatasi (host persis atau subdomain).
-    allowedHosts: list(process.env.MEDIA_URL_ALLOWED_HOSTS),
-    // Penyimpanan media masuk/keluar (gambar, video, stiker, audio, dokumen)
     dir: process.env.MEDIA_DIR || path.join(__dirname, "../media"),
     // Batas ukuran media yang diunduh dari pesan masuk WhatsApp
     maxIncomingBytes: int(process.env.MEDIA_MAX_MB, 25) * 1024 * 1024,
@@ -93,45 +74,6 @@ module.exports = {
     tokenSecret: process.env.MEDIA_TOKEN_SECRET || process.env.JWT_SECRET || "",
     // Masa berlaku URL media (jam). URL diperbarui otomatis setiap kali inbox dibuka.
     urlExpiryMs: int(process.env.MEDIA_URL_EXPIRY_HOURS, 168) * 60 * 60 * 1000,
-    // Normalisasi gambar keluar SEBELUM diserahkan ke Baileys. Baileys membuat thumbnail
-    // dengan sharp/libvips; gambar rusak atau resolusi ekstrem bisa membuat native library
-    // menghabiskan memori besar / crash. Kita batasi di sini dan kirim thumbnail sendiri.
-    outgoingImage: {
-      maxPixels: int(process.env.IMAGE_MAX_PIXELS, 40_000_000),
-      maxDimension: int(process.env.IMAGE_MAX_DIMENSION, 8192),
-      resizeMax: int(process.env.IMAGE_RESIZE_MAX, 2560),
-      quality: int(process.env.IMAGE_JPEG_QUALITY, 82),
-      thumbnailSize: int(process.env.IMAGE_THUMBNAIL_SIZE, 40),
-    },
-  },
-
-  autoReply: {
-    // Batas balasan otomatis per device per menit (0 = tanpa batas). Mengurangi risiko nomor diblokir.
-    maxPerMinute: int(process.env.AUTOREPLY_MAX_PER_MINUTE, 20),
-  },
-
-  // Antrean pesan keluar (outbox) untuk pengiriman massal yang lebih aman.
-  // Semua batas dihitung per device. 0 = tanpa batas.
-  queue: {
-    enabled: bool(process.env.QUEUE_ENABLED, true),
-    pollMs: int(process.env.QUEUE_POLL_MS, 1000),
-    // Jeda acak antar pesan dari antrean (ms).
-    minDelayMs: int(process.env.QUEUE_MIN_DELAY_MS, 8000),
-    maxDelayMs: int(process.env.QUEUE_MAX_DELAY_MS, 25000),
-    // Kuota rolling 1 jam / 24 jam. Menghitung SEMUA pesan keluar device,
-    // termasuk balasan manual dan auto-reply.
-    hourlyLimit: int(process.env.QUEUE_HOURLY_LIMIT, 60),
-    dailyLimit: int(process.env.QUEUE_DAILY_LIMIT, 200),
-    maxAttempts: int(process.env.QUEUE_MAX_ATTEMPTS, 3),
-    retryBaseMs: int(process.env.QUEUE_RETRY_BASE_MS, 30000),
-    retryMaxMs: int(process.env.QUEUE_RETRY_MAX_MS, 15 * 60 * 1000),
-    batchMax: int(process.env.QUEUE_BATCH_MAX, 100),
-    // Jam kirim lokal, mis. "8-21". Kosong / "0-24" = sepanjang hari.
-    activeHours: String(process.env.QUEUE_ACTIVE_HOURS ?? "").trim(),
-    timezone: process.env.QUEUE_TIMEZONE || "Asia/Jakarta",
-    // Simulasi "sedang mengetik" sebelum kirim (menambah jeda, lebih natural).
-    typing: bool(process.env.QUEUE_TYPING, false),
-    typingMaxMs: int(process.env.QUEUE_TYPING_MAX_MS, 4000),
   },
 
   webhook: {

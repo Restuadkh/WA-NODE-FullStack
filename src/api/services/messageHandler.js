@@ -2,7 +2,6 @@ const { Message, Chat } = require("../models");
 const logger = require("./logger");
 const { emitToDevice } = require("./realtime");
 const { notify } = require("./webhook");
-const autoReply = require("./autoReply");
 const mediaStore = require("./mediaStore");
 const config = require("../../config/config");
 const { parseContent, parseMedia, waTimestamp, findOrCreateChat, storeMessage } = require("./messageService");
@@ -167,7 +166,6 @@ async function handleIncoming(device, instance, msg, { fromHistory = false } = {
     timestamp: Number(msg.messageTimestamp) || null,
   });
   console.debug({ id: msg.key.id, jid, from_me: fromMe }, "Pesan masuk diproses");
-  if (!fromMe) await autoReply.reply({ device, instance, chat, text: parsed.type === "text" ? parsed.body : "" });
 }
 
 // Status pesan keluar: sent -> delivered -> read

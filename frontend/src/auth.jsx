@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, clearSession, getStoredUser, getToken, saveSession, setUnauthorizedHandler } from "./api";
-import { closeSocket } from "./socket";
+import { api, clearSession, getStoredUser, getToken, saveSession, setUnauthorizedHandler } from "./api";import { closeSocket } from "./socket";
 
 const AuthContext = createContext(null);
 
@@ -17,20 +16,6 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     setUnauthorizedHandler(logout);
   }, [logout]);
-
-  // Sesi lama (sebelum fitur izin) tidak membawa `permissions` — refresh sekali dari backend.
-  useEffect(() => {
-    if (!user || user.permissions) return;
-    api
-      .myRolePermissions()
-      .then((access) => {
-        if (!access?.role) return;
-        const next = { ...user, permissions: access.permissions, permission_overrides: access.overrides };
-        saveSession(api.getToken(), next);
-        setUser(next);
-      })
-      .catch(() => {});
-  }, [user]);
 
   const login = useCallback(async (email, password) => {
     const res = await api.login(email, password);

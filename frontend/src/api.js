@@ -122,77 +122,15 @@ export const api = {
   },
   markRead: (chatId) => request(`/api/chats/${chatId}/read`, { method: "POST" }).then(data),
 
-  // --- kontak per device
-  listContacts: (deviceId, q = "") =>
-    request(`/api/devices/${deviceId}/contacts${q ? `?q=${encodeURIComponent(q)}` : ""}`).then(data),
-  // form: FormData berisi field "file" (.csv), ATAU body { contacts: [{ phone, name }] }.
-  importContacts: (deviceId, { file, contacts } = {}) => {
-    if (file) {
-      const form = new FormData();
-      form.append("file", file, file.name || "contacts.csv");
-      return request(`/api/devices/${deviceId}/contacts/import`, { method: "POST", form }).then(data);
-    }
-    return request(`/api/devices/${deviceId}/contacts/import`, { method: "POST", body: { contacts } }).then(data);
-  },
-  deleteContact: (deviceId, id) =>
-    request(`/api/devices/${deviceId}/contacts/${id}`, { method: "DELETE" }),
-  // Pastikan Chat untuk kontak ada, -> { chat_id, device_id } untuk dibuka di Inbox.
-  openContact: (deviceId, id) =>
-    request(`/api/devices/${deviceId}/contacts/${id}/open`, { method: "POST" }).then(data),
+  // --- kontak (vCard)
   // Kirim kartu kontak (vCard) ke sebuah chat. `contacts` = array {name, phone};
   // bisa banyak sekaligus — terkirim sebagai satu pesan berisi daftar kontak.
   sendContact: (chatId, contacts) =>
     request(`/api/chats/${chatId}/messages`, { method: "POST", body: { contacts } }).then(data),
-  // Broadcast lewat antrean anti-ban. Template: {{nama}}, {{nomor}}. Media: file opsional.
-  broadcastContacts: (deviceId, { text, contact_ids, file } = {}) => {
-    if (file) {
-      const form = new FormData();
-      form.append("file", file, file.name || "media");
-      if (text) form.append("text", text);
-      if (contact_ids?.length) form.append("contact_ids", JSON.stringify(contact_ids));
-      return request(`/api/devices/${deviceId}/contacts/broadcast`, { method: "POST", form }).then(data);
-    }
-    return request(`/api/devices/${deviceId}/contacts/broadcast`, {
-      method: "POST",
-      body: { text, ...(contact_ids ? { contact_ids } : {}) },
-    }).then(data);
-  },
-  // URL CSV export (butuh token — diunduh manual oleh pemanggil dengan fetch+blob).
-  contactsExportUrl: (deviceId) => `/api/devices/${deviceId}/contacts/export`,
-
-  // --- auto-reply
-  listRules: (deviceId) => request(`/api/devices/${deviceId}/rules`).then(data),
-  createRule: (deviceId, rule) =>
-    request(`/api/devices/${deviceId}/rules`, { method: "POST", body: rule }).then(data),
-  updateRule: (id, patch) => request(`/api/rules/${id}`, { method: "PUT", body: patch }).then(data),
-  deleteRule: (id) => request(`/api/rules/${id}`, { method: "DELETE" }),
-
-  // --- antrean pesan
-  listJobs: (deviceId, { status = "", limit = 100, offset = 0 } = {}) => {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    params.set("limit", String(limit));
-    params.set("offset", String(offset));
-    return request(`/api/devices/${deviceId}/jobs?${params}`);
-  },
-  jobStats: (deviceId) => request(`/api/devices/${deviceId}/jobs/stats`).then(data),
-  cancelJob: (id) => request(`/api/jobs/${id}`, { method: "DELETE" }).then(data),
-  retryJob: (id) => request(`/api/jobs/${id}/retry`, { method: "POST" }).then(data),
 
   // --- manajemen user (admin)
   listUsers: () => request("/api/users").then(data),
   createUser: (payload) => request("/api/users", { method: "POST", body: payload }).then(data),
   updateUser: (id, patch) => request(`/api/users/${id}`, { method: "PUT", body: patch }).then(data),
-  // Izin khusus per user (menimpa rule role). null = kembali ikut role.
-  setUserPermissions: (id, overrides) =>
-    request(`/api/users/${id}/permissions`, { method: "PUT", body: overrides }).then(data),
   deleteUser: (id) => request(`/api/users/${id}`, { method: "DELETE" }),
-
-  // --- izin per role (super_admin > admin > agent)
-  // -> { permissions: {key: label}, roles: [...], editable_by_me: [role], matrix: {role: {role, ...perms}} }
-  listRolePermissions: () => request("/api/roles/permissions").then(data),
-  updateRolePermissions: (role, patch) =>
-    request(`/api/roles/permissions/${role}`, { method: "PUT", body: patch }).then(data),
-  // Izin milik user sendiri (dipakai frontend untuk refresh sesi lama).
-  myRolePermissions: () => request("/api/roles/permissions/mine").then(data),
 };

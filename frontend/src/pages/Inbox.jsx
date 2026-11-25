@@ -700,16 +700,19 @@ export default function Inbox() {
                   <button
                     type="button"
                     className={`btn btn-ghost icon-btn ${contactForm ? "active" : ""}`}
-                    onClick={async () => {
+                    onClick={() => {
                       if (contactForm) return setContactForm(null);
                       setContactForm({ q: "", selected: new Set() });
-                      // Ambil kontak device dari database untuk dropdown pilihan.
-                      try {
-                        const list = await api.listContacts(deviceId);
-                        setContactList(Array.isArray(list) ? list : []);
-                      } catch {
-                        setContactList([]); // gagal muat tetap bisa isi manual
-                      }
+                      // Pilihan kontak diambil dari daftar chat yang sudah dimuat.
+                      const list = (chats || [])
+                        .filter((c) => !c.is_group)
+                        .map((c) => ({
+                          id: c.id,
+                          name: c.contact_name || "",
+                          phone: c.phone || String(c.wa_jid || "").split("@")[0],
+                        }))
+                        .filter((c) => c.phone);
+                      setContactList(list);
                     }}
                     disabled={sending || recording}
                     title="Kirim kartu kontak (vCard)"

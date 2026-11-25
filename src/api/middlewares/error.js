@@ -4,7 +4,7 @@ const logger = require("../services/logger");
 const notFound = (req, res) =>
   res.status(404).json({ error: true, message: "Endpoint tidak ditemukan" });
 
-const errorHandler = (err, req, res, next) => {
+const errorHandler = (err, req, res, _next) => {
   let status = err.statusCode || err.status || 500;
   let message = err.message;
 

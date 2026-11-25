@@ -2,6 +2,30 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [3.0.0] — 2026-11-25
+
+### Diubah — versi ramping (breaking)
+Fitur sekunder dihapus agar permukaan bug jauh lebih kecil. Inti yang tersisa: login JWT (admin/agent), device + QR, Inbox teks & media, API kirim pesan, dan webhook (global + per device).
+
+Dihapus:
+- **Antrean anti-ban & broadcast**: `queueService`, `MessageJob`, endpoint `/api/message/queue*`, halaman Antrian, `QUEUE_*`, `QUEUE.md`.
+- **Import/export kontak & broadcast kontak**: controller/service kontak, halaman Kontak, endpoint `/api/devices/:id/contacts*`. Tabel `numbers` (`ContactName`) tetap ada untuk pemetaan LID/nama yang dipakai Inbox.
+- **Auto-reply rules**: `AutoReplyRule`, controller/service, halaman Auto-reply, `AUTOREPLY_*`.
+- **Role bertingkat & izin**: `super_admin`, `RolePermission`, `UserPermission`, `roleAccess`, ACL per device (`DeviceAgent`). Semua user kini melihat semua device; role hanya `admin`/`agent`.
+- **Media URL & resize gambar**: endpoint `/api/message/mediaurl`, `safeFetch`, `outgoingMedia`, dependency `sharp`, env `MEDIA_URL_*` dan `IMAGE_*`.
+- **Cron redial & pairing code**: `/api/cron/redial`, `CRON_SECRET`, login via pairing code. Tautkan device memakai QR saja.
+- **MySQL auth store**: `mysqlAuthState`, `AUTH_STORE`, `MYSQL_ENABLED`. Sesi WhatsApp selalu disimpan di file (`AUTH_DIR`).
+
+### Diperbaiki
+- **Webhook**: `X-Signature` kembali berisi HMAC-SHA256 (`sha256=<hex>`) dari body mentah. Sebelumnya nilai secret dikirim apa adanya.
+- **`npm test` di Windows**: skrip memakai `node --test test/` (glob sebelumnya gagal di cmd.exe).
+- **Validasi konfigurasi**: `process.exit(1)` diaktifkan kembali saat `JWT_SECRET` tidak valid, sehingga server tidak jalan dengan konfigurasi rusak.
+- **ESLint**: menambahkan `eslint.config.js` (flat config) agar `npm run lint` berjalan.
+
+### 🧪 Tes
+- Suite disesuaikan dengan fitur yang dihapus: **29 tes, semuanya lolos**.
+- Frontend berhasil di-build (`npm --prefix frontend run build`).
+
 ## [2.8.3] — 2026-11-22
 
 ### Diperbaiki — `EPERM: operation not permitted, unlink ... app-state-sync-key-*.json`

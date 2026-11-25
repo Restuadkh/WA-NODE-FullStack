@@ -3,10 +3,10 @@ import { api } from "../api";
 import { getSocket } from "../socket";
 import StatusBadge from "./StatusBadge";
 
-// Menampilkan QR (atau pairing code) untuk satu device dan memantau status sampai terhubung.
+// Menampilkan QR untuk satu device dan memantau status sampai terhubung.
 // Setiap polling juga membuat backend memulai ulang instance yang terputus / QR-nya kedaluwarsa.
 export default function QrModal({ device, onClose, onConnected }) {
-  const [info, setInfo] = useState(null); // { status, qr, pairing_code }
+  const [info, setInfo] = useState(null); // { status, qr }
   const [status, setStatus] = useState(device.status);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -55,7 +55,6 @@ export default function QrModal({ device, onClose, onConnected }) {
   }, [device.id]);
 
   const connected = status === "connected";
-  const pairing = info?.pairing_code;
   const retrying = info?.attempts;
   const cooldown = info?.cooldown_ms;
 
@@ -89,11 +88,6 @@ export default function QrModal({ device, onClose, onConnected }) {
             </div>
           ) : loading ? (
             <div className="qr-placeholder">Memuat…</div>
-          ) : pairing ? (
-            <div className="qr-done pairing">
-              <div className="muted small">Kode pairing</div>
-              <div className="pairing-code">{pairing}</div>
-            </div>
           ) : info?.qr ? (
             <img src={info.qr} alt="QR WhatsApp" className="qr-img" />
           ) : (
@@ -105,11 +99,7 @@ export default function QrModal({ device, onClose, onConnected }) {
           <ol className="qr-steps">
             <li>Buka WhatsApp di ponsel</li>
             <li>Pengaturan → Perangkat tertaut → Tautkan perangkat</li>
-            {pairing ? (
-              <li>Pilih “Tautkan dengan nomor telepon”, lalu masukkan kode di atas</li>
-            ) : (
-              <li>Arahkan kamera ke QR di atas (QR diperbarui otomatis)</li>
-            )}
+            <li>Arahkan kamera ke QR di atas (QR diperbarui otomatis)</li>
           </ol>
         )}
         {!connected && retryNote && <p className="muted small">{retryNote}</p>}

@@ -54,7 +54,7 @@ Aturan utama:
 | Event | Kapan dikirim |
 |---|---|
 | `messages` | Ada pesan yang masuk lewat event WhatsApp — termasuk pesan yang **Anda kirim dari ponsel** (`from_me: true`). |
-| `message.update` | Status pesan keluar berubah: `sent` → `delivered` → `read`. Berlaku untuk pesan dari dashboard, API, antrean, auto-reply, dan ponsel. |
+| `message.update` | Status pesan keluar berubah: `sent` → `delivered` → `read`. Berlaku untuk pesan dari dashboard, API, dan ponsel. |
 | `connection` | Status koneksi device berubah: `pending_qr`, `connected`, `disconnected`, `logged_out`. |
 
 > **Catatan:** pesan yang dikirim dari dashboard atau lewat API `/api/message/*` **tidak** memicu webhook `messages` (aplikasi Anda yang mengirim, jadi tidak perlu echo). Yang dikirim adalah pesan yang diterima dari WhatsApp, termasuk yang diketik dari ponsel yang tertaut. Untuk pesan keluar tersebut, gunakan `message.update` bila ingin tahu kapan pesan terkirim/dibaca.
@@ -243,7 +243,7 @@ Dikirim untuk setiap pesan WhatsApp yang masuk/disinkronkan (termasuk pesan dari
 
 Dikirim saat status pesan **keluar** berubah naik: `sent` → `delivered` → `read`. Event hanya dikirim ketika status benar-benar berubah (tidak ada duplikat atau penurunan status).
 
-Berlaku untuk semua pesan keluar: dashboard, API `/api/message/*`, antrean (`queue`), auto-reply, dan pesan yang Anda kirim dari ponsel yang tertaut.
+Berlaku untuk semua pesan keluar: dashboard, API `/api/message/*`, dan pesan yang Anda kirim dari ponsel yang tertaut.
 
 ```json
 {
@@ -322,7 +322,7 @@ Dikirim saat status koneksi device berubah.
 | `status` | string | `pending_qr`, `connected`, `disconnected`, `logged_out` |
 | `phone` | string/null | Nomor WhatsApp bila diketahui |
 
-Contoh pemakaian: matikan antrean pengiriman saat `disconnected`, tampilkan alert saat `logged_out`, atau catat waktu `connected`.
+Contoh pemakaian: tampilkan alert saat `disconnected`, atau catat waktu `connected`.
 
 > Event `connection` bisa terkirim berulang saat server restart (status yang sama). Aplikasi penerima sebaiknya menyimpan status terakhir dan mengabaikan duplikat.
 
@@ -571,7 +571,7 @@ Salin URL HTTPS hasil tunnel ke kolom Webhook URL.
 | Event | Cara memicu |
 |---|---|
 | `messages` | Kirim pesan WhatsApp ke nomor device (atau kirim dari ponsel yang tertaut ke chat mana pun). |
-| `message.update` | Kirim pesan dari dashboard/API/antrean, lalu tunggu centang berubah (terkirim → diterima → dibaca). Bisa juga dari ponsel yang tertaut. |
+| `message.update` | Kirim pesan dari dashboard/API, lalu tunggu centang berubah (terkirim → diterima → dibaca). Bisa juga dari ponsel yang tertaut. |
 | `connection` | Restart server, atau putuskan/sambungkan ulang device. Perubahan status juga terlihat di dashboard. |
 
 ### 9.4 Cek dari sisi server
@@ -592,7 +592,7 @@ Salin URL HTTPS hasil tunnel ke kolom Webhook URL.
 | Gejala | Kemungkinan penyebab | Solusi |
 |---|---|---|
 | Tidak ada request sama sekali | `webhook_url` kosong dan `WEBHOOK_URL` global kosong | Isi Webhook URL device lewat Edit |
-| Tidak ada request | Device belum `connected` | Tautkan device lewat QR/pairing |
+| Tidak ada request | Device belum `connected` | Tautkan device lewat QR |
 | Tidak ada request | URL mengarah ke `localhost` dari mesin yang salah | Pakai IP LAN / tunnel |
 | Request masuk tapi `401` | Signature tidak cocok | Hitung dari **raw body**, pastikan secret sama persis |
 | `X-Signature` tidak ada | Secret device kosong dan `WEBHOOK_SECRET` kosong | Isi secret device |

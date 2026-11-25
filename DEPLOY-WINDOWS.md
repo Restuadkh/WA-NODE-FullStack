@@ -21,7 +21,7 @@ Jadi:
 
 - **PM2 bukan memperbaiki bug reconnect.** PM2 membuat proses tetap hidup, restart otomatis saat crash, dan bisa dijalankan saat boot.
 - Reconnect hanya bisa bekerja selama **proses aplikasi hidup**.
-- Aplikasi ini **wajib satu proses** karena instance WhatsApp, socket, dan worker antrean hidup di memori.
+- Aplikasi ini **wajib satu proses** karena instance WhatsApp dan socket hidup di memori.
 
 > Jangan menjalankan `npm start` di terminal **dan** PM2/service secara bersamaan untuk nomor yang sama.
 
@@ -35,18 +35,15 @@ Di `.env`:
 NODE_ENV=production
 WHATSAPP_ENABLED=true
 RESTORE_SESSIONS_ON_START_UP=true
-# file (default) atau mysql
-AUTH_STORE=file
 WA_RECONNECT_BASE_MS=1000
 WA_RECONNECT_MAX_MS=300000
 WA_RECONNECT_MAX_ATTEMPTS=0
-QUEUE_ENABLED=true
 ```
 
 Pastikan:
 
 1. `npm run build:frontend` (atau `npm --prefix frontend run build`) sudah dijalankan.
-2. Database & folder `src/auth` (atau tabel Session) sudah siap.
+2. Database & folder `src/auth` sudah siap.
 3. Tidak ada proses lain yang memakai nomor/instance yang sama.
 4. Windows **tidak sleep** saat server harus online (Settings → System → Power → Sleep = Never).
 
@@ -75,8 +72,8 @@ pm2 logs wa-dashboard
 - `exec_mode: "fork"`
 - `instances: 1`
 - `autorestart: true`
-- `max_memory_restart: "700M"` — restart otomatis bila memori melebihi batas. Bila ini sering muncul saat kirim gambar, turunkan `IMAGE_RESIZE_MAX` / `IMAGE_MAX_PIXELS` (lihat **[MEDIA.md](MEDIA.md)**).
-- `kill_timeout: 20s` (agar worker antrean & socket WA sempat ditutup)
+- `max_memory_restart: "700M"` — restart otomatis bila memori melebihi batas. Turunkan `MEDIA_MAX_MB` atau batasi ukuran file yang dikirim bila ini sering terjadi.
+- `kill_timeout: 20s` (agar socket WA sempat ditutup)
 
 **Jangan** memakai `pm2 start src/server.js -i max` atau mode cluster.
 
@@ -220,7 +217,7 @@ Kekurangan: tidak ada manajemen proses/log semudah PM2, dan restart saat crash b
    ```powershell
    pm2 logs wa-dashboard --lines 200
    ```
-   Cari pesan `Memulihkan N sesi WhatsApp` dan `Worker antrean pesan aktif`.
+   Cari pesan `Memulihkan N sesi WhatsApp`.
 
 ---
 
@@ -251,13 +248,13 @@ Sejak v2.8.3 penghapusan sesi di-retry, dibuat serial, dan tidak lagi menggagalk
 Ya, untuk menjaga proses tetap hidup dan restart otomatis. Ia tidak menggantikan koneksi internet yang buruk, dan tidak memperbaiki sesi yang di-logout.
 
 **Kenapa harus satu instance?**
-Instance WhatsApp disimpan di memori proses (`Map`). Dua proses = dua socket untuk sesi yang sama → saling memutus (`connectionReplaced`) dan job antrean berisiko dobel.
+Instance WhatsApp disimpan di memori proses (`Map`). Dua proses = dua socket untuk sesi yang sama → saling memutus (`connectionReplaced`).
 
 **Kalau Windows sleep?**
 Koneksi terputus dan timer berhenti. Set sleep = Never, atau gunakan mini PC/server yang selalu menyala. Setelah bangun, aplikasi akan mencoba reconnect; jika proses mati, PM2/service menyalakannya lagi.
 
-**Apakah worker antrean ikut mati?**
-Ya, worker berjalan di proses yang sama. Karena status job disimpan di database, job `pending` akan dilanjutkan setelah proses hidup lagi. Job yang sedang `sending` saat crash dikembalikan ke `pending` saat startup (lihat `QUEUE_*` di `QUEUE.md`).
+**Apakah pesan yang sedang dikirim hilang saat proses mati?**
+Pengiriman bersifat langsung (tanpa antrean). Pesan yang belum sempat dikirim harus dikirim ulang oleh klien setelah device kembali online.
 
 **Boleh pakai Docker/WSL?**
 Boleh, tetapi tetap satu container/proses. Jangan scale ke beberapa replika untuk sesi yang sama.

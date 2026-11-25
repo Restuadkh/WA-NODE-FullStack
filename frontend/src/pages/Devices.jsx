@@ -10,12 +10,11 @@ const fmt = (d) => (d ? new Date(d).toLocaleString("id-ID", { dateStyle: "medium
 
 export default function Devices() {
   const { user } = useAuth();
-  // Aksi mengikuti matriks izin per role (diatur super_admin/admin dari menu Pengguna).
-  // Lihat device + QR + status selalu tersedia untuk device yang ditugaskan.
-  const perm = user?.permissions || {};
-  const canAdd = Boolean(perm.devices_add);
-  const canEdit = Boolean(perm.devices_edit);
-  const canDelete = Boolean(perm.devices_delete);
+  // Hanya admin yang boleh mengelola device; agent boleh melihat & menautkan QR.
+  const isAdmin = user?.role === "admin";
+  const canAdd = isAdmin;
+  const canEdit = isAdmin;
+  const canDelete = isAdmin;
 
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,7 +67,7 @@ export default function Devices() {
       setWebhookSecret("");
       setShowForm(false);
       await load();
-      setQrDevice(device); // langsung tampilkan QR / kode pairing
+      setQrDevice(device); // langsung tampilkan QR
     } catch (e2) {
       setError(e2.message);
     } finally {
@@ -78,7 +77,7 @@ export default function Devices() {
 
   const remove = async (d) => {
     const ok = window.confirm(
-      `Hapus device “${d.name}”?\n\nWhatsApp akan di-logout dan semua chat, pesan, serta rule auto-reply device ini ikut terhapus. Tindakan ini tidak bisa dibatalkan.`,
+      `Hapus device “${d.name}”?\n\nWhatsApp akan di-logout dan semua chat serta pesan device ini ikut terhapus. Tindakan ini tidak bisa dibatalkan.`,
     );
     if (!ok) return;
     try {
@@ -110,7 +109,7 @@ export default function Devices() {
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="mis. CS Fokus.Net" maxLength={100} required autoFocus />
           </label>
           <label className="field grow">
-            <span>Nomor (opsional, untuk kode pairing tanpa QR)</span>
+            <span>Nomor (opsional)</span>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="628123456789" inputMode="numeric" />
           </label>
           <label className="field grow">

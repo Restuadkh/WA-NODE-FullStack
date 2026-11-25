@@ -71,12 +71,8 @@ async function resetToFreshDir(base) {
   return fresh;
 }
 
-// Mengembalikan { state, saveCreds } sesuai AUTH_STORE (file | mysql)
+// Mengembalikan { state, saveCreds } dari folder AUTH_DIR (file).
 async function loadAuthState(key) {
-  if (config.whatsapp.authStore === "mysql") {
-    return require("./mysqlAuthState")(key);
-  }
-
   const base = authDirFor(key);
   const marker = path.join(base, LOGOUT_MARKER);
 
@@ -97,17 +93,6 @@ async function loadAuthState(key) {
 // Tidak pernah melempar error: kegagalan menghapus file sesi tidak boleh
 // menggagalkan penanganan connection.update sampai proses berhenti/recover.
 async function removeAuthState(key) {
-  if (config.whatsapp.authStore === "mysql") {
-    const sequelize = require("../../config/database");
-    await sequelize
-      // sanitasi harus sama dengan mysqlAuthState.js
-      .query("DELETE FROM `Session` WHERE session_key = :k", {
-        replacements: { k: String(key).replace(/[^a-zA-Z0-9_]/g, "_") },
-      })
-      .catch(() => {});
-    return true;
-  }
-
   const base = authDirFor(key);
   const previous = pendingRemovals.get(base) || Promise.resolve();
   let settled;
@@ -143,7 +128,6 @@ async function removeAuthState(key) {
 // Daftar sesi lama (folder di AUTH_DIR) untuk diadopsi menjadi Device.
 // Folder ber-marker logout sengaja dilewati agar tidak reconnect memakai kredensial lama.
 function listStoredKeys() {
-  if (config.whatsapp.authStore !== "file") return [];
   try {
     return fs
       .readdirSync(authRoot, { withFileTypes: true })

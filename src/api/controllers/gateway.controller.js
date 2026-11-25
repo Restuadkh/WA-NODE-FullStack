@@ -1,11 +1,6 @@
 const { sendAndStore, PREVIEW } = require("../services/messageService");
-const manager = require("../whatsapp/manager");
-// Dipanggil lewat objek modul (safeFetch.fetchRemoteMedia) agar mudah di-stub di test.
-const safeFetch = require("../../utils/safeFetch");
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
-
-const MEDIA_TYPES = ["image", "video", "audio", "sticker", "document"];
 
 const target = (req) => {
   const id = req.body?.id;
@@ -56,49 +51,6 @@ const uploadHandler = (type, { forcePtt = false, defaultPtt = false } = {}) => a
   res.status(201).json({ error: false, data: result });
 };
 
-// Media dari URL: server mengunduh sendiri lewat pengunduh yang menolak alamat internal (SSRF),
-// lalu mengirim buffer-nya. URL TIDAK PERNAH diserahkan langsung ke Baileys.
-async function mediaUrl(req, res) {
-  const { url, type, mimetype, caption } = req.body || {};
-  if (!MEDIA_TYPES.includes(type)) throw httpError(`type harus salah satu dari: ${MEDIA_TYPES.join(", ")}`, 400);
-  if (!/^https?:\/\//i.test(String(url || ""))) throw httpError("url harus diawali http:// atau https://", 400);
-  const to = target(req);
-  const ptt = type === "audio" ? isTrue(req.body?.ptt) : false;
-
-  const media = await safeFetch.fetchRemoteMedia(String(url));
-  const file = {
-    buffer: media.buffer,
-    mimetype: String(mimetype || media.mimetype || "application/octet-stream"),
-    filename: req.body?.filename || media.filename || "file",
-  };
-
-  const { result } = await sendAndStore({
-    device: req.device,
-    instance: req.instance,
-    to,
-    send: (inst, jid) => inst.sendMedia(jid, file, type, caption || "", { ptt }),
-    preview: { type, body: labelFor(type, { caption, ptt }) },
-    attachment: { ...file, type, caption, ptt },
-  });
-  res.status(201).json({ error: false, data: result });
-}
-
-// Redial paksa untuk device pemilik API key ini (X-Api-Key: <instance_key>).
-// Dipakai crontab/monitoring: selalu memulai ulang koneksi walau sedang connected.
-// Bisa juga dibatasi bila sudah online: kirim body { only_if_offline: true }.
-async function redial(req, res) {
-  const onlyIfOffline = ["true", "1", "yes", "on"].includes(
-    String(req.body?.only_if_offline).toLowerCase(),
-  );
-  const instance = req.instance || (await manager.ensure(req.device));
-  if (onlyIfOffline && instance.online) {
-    return res.json({ error: false, data: { redialed: false, status: instance.status } });
-  }
-  await manager.redial(req.device);
-  const after = manager.get(req.device.instance_key);
-  res.json({ error: false, data: { redialed: true, status: after?.status || "starting" } });
-}
-
 module.exports = {
   text,
 
@@ -109,5 +61,4 @@ module.exports = {
   // "note" = voice note (PTT)
   voiceNote: uploadHandler("audio", { forcePtt: true }),
   document: uploadHandler("document"),
-  mediaUrl,
 };

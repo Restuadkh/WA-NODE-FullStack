@@ -33,21 +33,16 @@ const http = require("http");
 const bcrypt = require("bcryptjs");
 
 const sequelize = require("../src/config/database");
-const { User, Device, Chat, Message, MessageJob } = require("../src/api/models");
+const { User, Device, Chat, Message } = require("../src/api/models");
 const app = require("../src/app");
 const { initRealtime } = require("../src/api/services/realtime");
 const manager = require("../src/api/whatsapp/manager");
 const { handleIncoming, handleStatusUpdates } = require("../src/api/services/messageHandler");
 const { parseContent, parseMedia } = require("../src/api/services/messageService");
 const mediaStore = require("../src/api/services/mediaStore");
-const safeFetch = require("../src/utils/safeFetch");
 const { toJid, normalizePhoneDigits } = require("../src/api/whatsapp/jid");
-const { matches } = require("../src/api/services/autoReply");
-const queueService = require("../src/api/services/queueService");
-const { prepareOutgoingImage } = require("../src/api/services/outgoingMedia");
 
-// PNG 1x1 valid. Tes lama memakai string "png"/"gambar" sehingga gambar rusak lolos;
-// sekarang sendMedia memvalidasi magic bytes sebelum menyerahkan ke Baileys.
+// PNG 1x1 valid. sendMedia memvalidasi magic bytes sebelum menyerahkan ke Baileys.
 const PNG_1X1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j///9/AAn7A/0FQ0XKAAAAAElFTkSuQmCC", "base64");
 
 let server;
@@ -57,11 +52,6 @@ let agentToken;
 let device;
 let instance;
 const sent = []; // pesan yang "dikirim" lewat WhatsApp palsu
-
-// Worker mengirim maksimal satu pesan per device per putaran (jeda antar pesan).
-const drainQueue = async (rounds = 20) => {
-  for (let i = 0; i < rounds; i++) await queueService._tick();
-};
 
 const call = async (method, url, { token, body } = {}) => {
   const res = await fetch(base + url, {
@@ -101,7 +91,7 @@ test.after(async () => {
   fs.rmSync(authDir, { recursive: true, force: true });
 });
 
-test("unit: toJid, parseContent, matches", () => {
+test("unit: toJid, parseContent, parseMedia", () => {
   assert.equal(toJid("0812-3456-789"), "628123456789@s.whatsapp.net");
   assert.equal(toJid("+62 812 3456 789"), "628123456789@s.whatsapp.net");
   assert.equal(toJid("1203630@g.us"), "1203630@g.us");
@@ -123,12 +113,6 @@ test("unit: toJid, parseContent, matches", () => {
   assert.equal(media.fileLength, 100);
   assert.equal(parseMedia({ audioMessage: { ptt: true, seconds: 3 } }).ptt, true);
   assert.equal(parseMedia({ conversation: "x" }), null);
-
-  const rule = (keyword, match_type) => ({ keyword, match_type });
-  assert.ok(matches(rule("*", "exact"), "apa saja"));
-  assert.ok(matches(rule("halo", "contains"), "oke halo kak"));
-  assert.ok(!matches(rule("halo", "exact"), "halo kak"));
-  assert.ok(matches(rule("halo", "starts_with"), "halo kak"));
 });
 
 test("health dan 404 JSON", async () => {
@@ -163,16 +147,12 @@ test("device: hak akses, pembuatan, dan penyembunyian instance_key", async () =>
   assert.equal(duplicate.status, 409, "nomor WhatsApp tidak boleh dipakai dua device");
   device = await Device.findByPk(created.body.data.id);
 
-  // ACL: agent ditugaskan ke device ini agar bisa melihat chat-nya.
-  const { DeviceAgent } = require("../src/api/models");
-  const agentUser = await User.findOne({ where: { email: "agen@test.id" } });
-  await DeviceAgent.create({ user_id: agentUser.id, device_id: device.id });
-
+  // Semua user (admin & agent) boleh melihat semua device.
   const asAdmin = await call("GET", "/api/devices", { token: adminToken });
   const asAgent = await call("GET", "/api/devices", { token: agentToken });
   assert.ok(asAdmin.body.data[0].instance_key);
   const agentView0 = asAgent.body.data.find((d) => d.id === device.id);
-  assert.ok(agentView0, "agent melihat device yang ditugaskan");
+  assert.ok(agentView0, "agent melihat device");
   assert.equal(agentView0.instance_key, undefined);
 
   const qr = await call("GET", `/api/devices/${device.id}/qr`, { token: adminToken });
@@ -211,17 +191,11 @@ test("device: webhook per device disimpan, disembunyikan dari agent, dan bisa di
   assert.equal(created.body.data.webhook_secret, "rahasia-webhook");
   assert.equal(created.body.data.webhook_configured, true);
 
-  // ACL: agent hanya melihat device yang ditugaskan; device ini belum ditugaskan.
-  assert.equal((await call("GET", "/api/devices", { token: agentToken })).body.data.find((d) => d.id === created.body.data.id), undefined);
-  const { DeviceAgent } = require("../src/api/models");
-  const agentUser = await User.findOne({ where: { email: "agen@test.id" } });
-  await DeviceAgent.create({ user_id: agentUser.id, device_id: created.body.data.id });
-  // Tulis langsung ke DB tidak lewat API -> cache ACL (30s) di-refresh manual.
-  require("../src/api/services/deviceAccess").invalidateAllDeviceAccess();
+  // Agent melihat semua device, tetapi instance_key/webhook disembunyikan.
   const agentView = (await call("GET", "/api/devices", { token: agentToken })).body.data.find(
     (d) => d.id === created.body.data.id,
   );
-  assert.ok(agentView, "device yang ditugaskan terlihat oleh agent");
+  assert.ok(agentView, "device terlihat oleh agent");
   assert.equal(agentView.webhook_url, undefined);
   assert.equal(agentView.webhook_secret, undefined);
   assert.equal(agentView.webhook_configured, true);
@@ -401,9 +375,6 @@ test("kirim media dari dashboard: multipart, stiker, dan voice note", async () =
   assert.equal(imageBody.data.type, "image");
   assert.ok(imageBody.data.media_url);
   assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
-  assert.ok(Buffer.isBuffer(sent.at(-1).content.jpegThumbnail), "thumbnail disiapkan aplikasi, bukan Baileys");
-  assert.equal(sent.at(-1).content.width, 1);
-  assert.equal(sent.at(-1).content.height, 1);
   assert.equal(sent.at(-1).content.caption, "Halo");
 
   const sticker = new FormData();
@@ -422,28 +393,6 @@ test("kirim media dari dashboard: multipart, stiker, dan voice note", async () =
   assert.equal(noteData.type, "audio");
   assert.equal(noteData.media_ptt, true);
   assert.equal(sent.at(-1).content.ptt, true);
-});
-
-test("gambar keluar: file rusak ditolak, gambar besar dikecilkan, thumbnail dibuat sendiri", async () => {
-  await assert.rejects(
-    () => prepareOutgoingImage({ buffer: Buffer.from("bukan-gambar"), mimetype: "image/png" }),
-    (err) => err.statusCode === 400 && /bukan gambar/i.test(err.message),
-  );
-
-  const small = { buffer: PNG_1X1, mimetype: "image/png" };
-  await prepareOutgoingImage(small);
-  assert.equal(small.width, 1);
-  assert.equal(small.height, 1);
-  assert.ok(Buffer.isBuffer(small.jpegThumbnail), "thumbnail dikirim ke Baileys");
-
-  const sharp = require("sharp");
-  const huge = await sharp({ create: { width: 6000, height: 6000, channels: 3, background: "#ffffff" } })
-    .png()
-    .toBuffer();
-  const resized = { buffer: huge, mimetype: "image/png" };
-  await prepareOutgoingImage(resized);
-  assert.equal(resized.mimetype, "image/jpeg");
-  assert.ok(resized.width <= 2560 && resized.height <= 2560, `ukuran akhir ${resized.width}x${resized.height}`);
 });
 
 test("daftar chat, riwayat pesan (terbaru, urut naik), tandai dibaca", async () => {
@@ -648,153 +597,6 @@ test("reply: membalas pesan pribadi & grup menyertakan quoted key yang benar", a
   assert.equal(quoted3.key.participant, incG.sender_jid);
 });
 
-test("broadcast: antrean per kontak dengan template {{nama}}/{{nomor}}", async () => {
-  const { ContactName } = require("../src/api/models");
-  await ContactName.create({ device_id: device.id, from_jid: "6285550001@s.whatsapp.net", lid_user: "999001@lid", notify: "Andi" });
-  await ContactName.create({ device_id: device.id, from_jid: "6285550002@s.whatsapp.net", lid_user: "999002@lid", notify: "Bunga" });
-
-  const res = await call("POST", `/api/devices/${device.id}/contacts/broadcast`, {
-    token: adminToken,
-    body: { text: "Hai {{nama}}, catatan untuk {{nomor}}" },
-  });
-  assert.equal(res.status, 200);
-  assert.equal(res.body.data.total, 2);
-  assert.equal(res.body.data.queued, 2);
-
-  // Worker mengirim sesudahnya (anti-ban), bukan serentak saat request.
-  await drainQueue();
-  const byJid = (jid) => sent.filter((s) => s.jid === jid).at(-1);
-  assert.equal(byJid("6285550001@s.whatsapp.net").content.text, "Hai Andi, catatan untuk 6285550001");
-  assert.equal(byJid("6285550002@s.whatsapp.net").content.text, "Hai Bunga, catatan untuk 6285550002");
-
-  // Validasi: teks kosong ditolak.
-  assert.equal(
-    (await call("POST", `/api/devices/${device.id}/contacts/broadcast`, { token: adminToken, body: { text: "   " } })).status,
-    400,
-  );
-});
-
-test("izin: super admin selalu penuh (contacts_import ikut tercentang)", async () => {
-  const roleAccess = require("../src/api/services/roleAccess");
-  const cfg = await roleAccess.getRoleConfig("super_admin");
-  assert.equal(cfg.contacts_import, true);
-  for (const key of Object.keys(roleAccess.PERMISSIONS)) {
-    assert.equal(cfg[key], true, `super_admin.${key} harus true`);
-  }
-  assert.equal(await roleAccess.can({ role: "super_admin" }, "contacts_import"), true);
-
-  // Matriks yang dilihat halaman Pengguna ikut benar (tanpa perlu baris DB super_admin).
-  const { RolePermission } = require("../src/api/models");
-  await RolePermission.destroy({ where: { role: "super_admin" } });
-  const matrix = await roleAccess.getRoleConfig("super_admin");
-  assert.equal(matrix.contacts_import, true, "tetap penuh walau baris DB tidak ada");
-
-  // Admin default boleh import kontak (izin baru mengikuti DEFAULTS).
-  const adminCfg = await roleAccess.getRoleConfig("admin");
-  assert.equal(adminCfg.contacts_import, true);
-});
-
-test("import kontak: file VCF diparse (nama + nomor, satu TEL satu kontak)", async () => {
-  const vcf = [
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "FN:Budi Santoso",
-    "TEL;TYPE=CELL:+62 812-3456-7890",
-    "END:VCARD",
-    "",
-    "BEGIN:VCARD",
-    "N:Doe;John;;;",
-    "TEL:+6281234567892",
-    "END:VCARD",
-  ].join("\r\n");
-
-  const form = new FormData();
-  form.append("file", new Blob([vcf], { type: "text/vcard" }), "kontak.vcf");
-  const res = await fetch(`${base}/api/devices/${device.id}/contacts/import`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${adminToken}` },
-    body: form,
-  });
-  assert.equal(res.status, 200);
-  const { data } = await res.json();
-  assert.equal(data.imported, 2);
-  assert.equal(data.errors.length, 0);
-
-  const rows = await require("../src/api/models").ContactName.findAll({ where: { device_id: device.id, notify: ["Budi Santoso", "John Doe"] } });
-  const jids = rows.map((r) => r.from_jid).sort();
-  assert.deepEqual(jids, ["6281234567890@s.whatsapp.net", "6281234567892@s.whatsapp.net"]);
-});
-
-test("import kontak: VCF prefix 00, format beda satu nomor = satu kontak", async () => {
-  // Persis contoh file pengguna: "0062..." dan "006-283-..." dan "+62..."
-  const vcf = [
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "FN:Okta ap",
-    "N:ap;Okta;;;",
-    "TEL;TYPE=CELL:00628976863201",
-    "END:VCARD",
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "N:RSUDPS;Haryono;Wawan;;",
-    "FN:Haryono Wawan RSUDPS",
-    "TEL;TYPE=CELL:+6283830938867",
-    "END:VCARD",
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "N:RSUDPS;Haryono Wawan;;;",
-    "FN:Haryono Wawan RSUDPS",
-    "TEL;TYPE=CELL:006-283-830938867",
-    "END:VCARD",
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "N:Wawan RSUDPS;Haryono;;;",
-    "FN:Haryono Wawan RSUDPS",
-    "TEL;TYPE=CELL:+6283830938867",
-    "END:VCARD",
-  ].join("\r\n");
-
-  const form = new FormData();
-  form.append("file", new Blob([vcf], { type: "text/vcard" }), "kontak.vcf");
-  const res = await fetch(`${base}/api/devices/${device.id}/contacts/import`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${adminToken}` },
-    body: form,
-  });
-  const { data } = await res.json();
-  // 4 baris VCF, tapi hanya 2 nomor unik (006-283-830938867 == +6283830938867)
-  assert.equal(data.total, 2);
-  assert.equal(data.parsed_rows, 4);
-  assert.equal(data.imported + data.updated, 2);
-
-  const rows = await require("../src/api/models").ContactName.findAll({
-    where: { device_id: device.id, notify: ["Okta ap", "Haryono Wawan RSUDPS"] },
-  });
-  const jids = rows.map((r) => r.from_jid).sort();
-  // 00628976863201 -> 628976863201 (prefix 00 dibuang, bukan 62062...)
-  assert.deepEqual(jids, ["6283830938867@s.whatsapp.net", "628976863201@s.whatsapp.net"]);
-});
-
-test("import kontak: nomor salah (62 + 0) diperbaiki; import ulang meng-update, bukan dobel", async () => {
-  const { toJid } = require("../src/api/whatsapp/jid");
-  // Entri kontak yang salah simpan: 0 setelah kode negara -> dibuang
-  assert.equal(toJid("+6208934151234"), "628934151234@s.whatsapp.net");
-  assert.equal(toJid("0062812-3456-789"), "628123456789@s.whatsapp.net");
-
-  // Import nomor yang sama (format beda) dalam dua import terpisah -> baris sama di-UPDATE
-  const r1 = await apiImportJson([{ phone: "08112223331", name: "Nama Lama" }]);
-  assert.equal(r1.imported + r1.updated, 1);
-  const r2 = await apiImportJson([{ phone: "628112223331", name: "Nama Baru" }]);
-  assert.equal(r2.updated, 1, "nomor sama (0811... vs 62811...) terdeteksi sudah ada -> update");
-  const row = await require("../src/api/models").ContactName.findOne({ where: { device_id: device.id, from_jid: "628112223331@s.whatsapp.net" } });
-  assert.equal(row.notify, "Nama Baru");
-});
-
-async function apiImportJson(contacts) {
-  const { body } = await call("POST", `/api/devices/${device.id}/contacts/import`, { token: adminToken, body: { contacts } });
-  return body.data;
-}
-
 test("history sync (reconnect): pesan lama disimpan tanpa auto-reply & webhook", async () => {
   // Riwayat ala Baileys: tipe "append", berisi pesan masuk & keluar saat device offline.
   const historyMsg = (text, jid, fromMe, id) => ({
@@ -804,8 +606,6 @@ test("history sync (reconnect): pesan lama disimpan tanpa auto-reply & webhook",
     message: { conversation: text },
   });
 
-  // Rule auto-reply ada (dibuat test sebelumnya) — pesan history TIDAK boleh memicunya.
-  const rulesBefore = await require("../src/api/models").AutoReplyRule.count();
   const sentBefore = sent.length;
 
   const old = historyMsg("halo lama", "628666666666@s.whatsapp.net", false, "HS1");
@@ -823,7 +623,6 @@ test("history sync (reconnect): pesan lama disimpan tanpa auto-reply & webhook",
 
   // Tidak ada auto-reply terkirim & tidak ada webhook history
   assert.equal(sent.length, sentBefore, "auto-reply tidak terpicu oleh history");
-  assert.equal(await require("../src/api/models").AutoReplyRule.count(), rulesBefore);
 
   // Untuk chat BARU dari history: last_message_at = waktu pesan history (sudah benar).
   // Pastikan juga tidak bisa dimundurkan oleh history yang datang belakangan.
@@ -831,37 +630,6 @@ test("history sync (reconnect): pesan lama disimpan tanpa auto-reply & webhook",
   await handleIncoming(device, instance, historyMsg("lebih tua lagi", "628666666666@s.whatsapp.net", false, "HS3"), { fromHistory: true });
   await chat.reload();
   assert.equal(new Date(chat.last_message_at).getTime(), before, "last_message_at tidak dimundurkan oleh history");
-});
-
-test("broadcast media: antrean berisi payload media per kontak", async () => {
-  const form = new FormData();
-  form.append("text", "Katalog {{nama}}");
-  form.append("contact_ids", JSON.stringify([]));
-  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "katalog.png");
-
-  const res = await fetch(`${base}/api/devices/${device.id}/contacts/broadcast`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${adminToken}` },
-    body: form,
-  });
-  const { data } = await res.json();
-  assert.equal(res.status, 200);
-  assert.ok(data.queued >= 2, "broadcast media masuk antrean per kontak");
-
-  await drainQueue();
-  const mediaSends = sent.filter((s) => s.content?.image);
-  assert.ok(mediaSends.length >= 2, "media terkirim ke kontak oleh worker");
-  assert.ok(mediaSends.some((s) => s.content?.caption?.includes("Katalog")));
-});
-
-test("export kontak: CSV berisi nomor, nama, lid", async () => {
-  const res = await fetch(`${base}/api/devices/${device.id}/contacts/export`, {
-    headers: { Authorization: `Bearer ${adminToken}` },
-  });
-  assert.equal(res.status, 200);
-  const csv = await res.text();
-  assert.match(csv, /phone,name,lid/);
-  assert.match(csv, /Budi Santoso/);
 });
 
 test("status pesan keluar naik: sent -> delivered -> read, dan dikirim ke webhook", async () => {
@@ -920,29 +688,6 @@ test("status pesan keluar naik: sent -> delivered -> read, dan dikirim ke webhoo
   }
 });
 
-test("auto-reply: rule hanya dibuat admin, membalas sekali (cooldown)", async () => {
-  const body = { keyword: "harga", match_type: "contains", reply_text: "Paket mulai Rp150rb", priority: 5 };
-  assert.equal((await call("POST", `/api/devices/${device.id}/rules`, { token: agentToken, body })).status, 403);
-  assert.equal((await call("POST", `/api/devices/${device.id}/rules`, { token: adminToken, body: { keyword: "", reply_text: "x" } })).status, 400);
-  const made = await call("POST", `/api/devices/${device.id}/rules`, { token: adminToken, body });
-  assert.equal(made.status, 201);
-
-  const before = sent.length;
-  await handleIncoming(device, instance, incoming("kak info HARGA paket?", { key: { remoteJid: "628333333333@s.whatsapp.net", id: "R1" } }));
-  assert.equal(sent.length, before + 1);
-  assert.equal(sent.at(-1).content.text, "Paket mulai Rp150rb");
-  const auto = await Message.findOne({ where: { is_auto_reply: true } });
-  assert.ok(auto);
-
-  await handleIncoming(device, instance, incoming("harga lagi", { key: { remoteJid: "628333333333@s.whatsapp.net", id: "R2" } }));
-  assert.equal(sent.length, before + 1, "cooldown mencegah balasan beruntun");
-
-  const upd = await call("PUT", `/api/rules/${made.body.data.id}`, { token: adminToken, body: { is_active: false } });
-  assert.equal(upd.body.data.is_active, false);
-  const list = await call("GET", `/api/devices/${device.id}/rules`, { token: agentToken });
-  assert.equal(list.body.data.length, 1);
-});
-
 test("gateway API: key, normalisasi nomor, nomor tidak terdaftar, device offline", async () => {
   const key = device.instance_key;
   const post = (path, body) => call("POST", `/api/message/${path}?key=${key}`, { body });
@@ -958,35 +703,6 @@ test("gateway API: key, normalisasi nomor, nomor tidak terdaftar, device offline
   assert.ok(await Chat.findOne({ where: { wa_jid: "6281234567890@s.whatsapp.net" } }), "pesan API muncul di inbox");
 
   assert.equal((await post("text", { id: "628000000000", message: "x" })).status, 422);
-  assert.equal((await post("mediaurl", { id: "0811222", type: "exe", url: "http://x/y" })).status, 400);
-  assert.equal((await post("mediaurl", { id: "0811222", type: "image", url: "ftp://x/y" })).status, 400);
-
-  const originalFetch = safeFetch.fetchRemoteMedia;
-  safeFetch.fetchRemoteMedia = async () => ({
-    buffer: PNG_1X1,
-    mimetype: "image/png",
-    filename: "a.png",
-  });
-  let media;
-  try {
-    media = await post("mediaurl", { id: "0811222333", type: "image", url: "https://x.id/a.png", mimetype: "image/png", caption: "Bukti" });
-  } finally {
-    safeFetch.fetchRemoteMedia = originalFetch;
-  }
-  assert.equal(media.status, 201);
-  assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
-  assert.equal(sent.at(-1).content.caption, "Bukti");
-
-  const latest = await Message.findOne({ order: [["createdAt", "DESC"]] });
-  assert.equal(latest.type, "image");
-  assert.ok(latest.media_url);
-  const [, , mediaDevice, mediaFile] = latest.media_url.split("/");
-  const [diskFile, query] = mediaFile.split("?");
-  assert.equal(
-    mediaStore.verify(mediaDevice, diskFile, new URLSearchParams(query).get("t"), new URLSearchParams(query).get("e")),
-    true,
-  );
-  assert.equal(latest.media_mimetype, "image/png");
 
   instance.status = "disconnected";
   assert.equal((await post("text", { id: "0811222333", message: "x" })).status, 409);
@@ -1006,232 +722,6 @@ test("gateway API: token bearer saat PROTECT_ROUTES aktif", async () => {
   } finally {
     config.gatewayApi.protect = false;
   }
-});
-
-test("antrean: validasi, boleh enqueue saat device offline, dan worker mengirim", async () => {
-  const post = (path, body) => call("POST", `/api/message/queue${path}?key=${device.instance_key}`, { body });
-
-  assert.equal((await post("", { message: "tanpa tujuan" })).status, 400);
-  assert.equal((await post("", { id: "0811222333" })).status, 400);
-  assert.equal((await post("", { id: "0811222333", message: "x", scheduled_at: "bukan-tanggal" })).status, 400);
-  assert.equal((await post("", { id: "0811222333", message: "x", priority: "tinggi" })).status, 400);
-  assert.equal((await post("/batch", { messages: [] })).status, 400);
-  assert.equal((await post("/batch", { messages: [{ id: "0811222333", message: "" }] })).status, 400);
-
-  // Endpoint antrean tidak mensyaratkan device online.
-  instance.status = "disconnected";
-  const queued = await post("", { id: "0811222333", message: "Halo dari antrean" });
-  assert.equal(queued.status, 201);
-  assert.equal(queued.body.data.status, "pending");
-  assert.equal(queued.body.data.to_jid, "62811222333@s.whatsapp.net");
-
-  // ref yang sama = idempotent (tidak membuat job ganda).
-  const ref = `ref-${Date.now()}`;
-  const first = await post("", { id: "0811222333", message: "sekali", ref });
-  const second = await post("", { id: "0811222333", message: "sekali", ref });
-  assert.equal(first.status, 201);
-  assert.equal(second.status, 200);
-  assert.equal(second.body.duplicate, true);
-  assert.equal(second.body.data.id, first.body.data.id);
-  assert.equal(await MessageJob.count({ where: { client_ref: ref } }), 1);
-
-  instance.status = "connected";
-  const before = sent.length;
-  await drainQueue();
-  const delivered = await MessageJob.findByPk(queued.body.data.id);
-  assert.equal(delivered.status, "sent");
-  assert.ok(delivered.sent_at);
-  assert.ok(delivered.message_id);
-  assert.equal(sent.length, before + 2, "dua job pending terkirim (queued + first)");
-  assert.ok(sent.some((m) => m.content.text === "Halo dari antrean"));
-
-  // Batch: semua item dibuat lalu dikirim oleh worker.
-  const batch = await post("/batch", {
-    messages: [
-      { id: "0811222444", message: "batch satu" },
-      { id: "0811222555", message: "batch dua", priority: 5 },
-    ],
-  });
-  assert.equal(batch.status, 201);
-  assert.equal(batch.body.data.queued, 2);
-  await drainQueue();
-  // Broadcast & kirim Inbox dari test lain menambah job — hitung hanya job test ini.
-  assert.equal(
-    await MessageJob.count({
-      where: {
-        status: "sent",
-        device_id: device.id,
-        source: { [require("sequelize").Op.notIn]: ["broadcast", "inbox"] },
-      },
-    }),
-    4,
-  );
-});
-
-test("antrean media: file disimpan sementara, dikirim, lalu dibersihkan", async () => {
-  const form = new FormData();
-  form.append("id", "0811222666");
-  form.append("type", "image");
-  form.append("caption", "Dari antrean");
-  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "antrean.png");
-
-  const res = await fetch(`${base}/api/message/queue/media?key=${device.instance_key}`, {
-    method: "POST",
-    body: form,
-  });
-  assert.equal(res.status, 201);
-  const body = await res.json();
-  const job = await MessageJob.findByPk(body.data.id);
-  assert.equal(job.status, "pending");
-  assert.equal(job.payload.media.disk_name.length > 0, true);
-  assert.equal(body.data.payload.media.disk_name, undefined, "disk_name tidak bocor ke API");
-
-  await drainQueue();
-  await job.reload();
-  assert.equal(job.status, "sent");
-  assert.equal(mediaStore.resolve(device.id, job.payload.media.disk_name), null, "file sementara dihapus");
-  assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
-  assert.equal(sent.at(-1).content.caption, "Dari antrean");
-});
-
-test("restart mendadak: job gambar antrean yang baru diklaim langsung pulih saat start", async () => {
-  const form = new FormData();
-  form.append("id", "0811222888");
-  form.append("type", "image");
-  form.append("caption", "Setelah restart");
-  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "restart.png");
-
-  const res = await fetch(`${base}/api/message/queue/media?key=${device.instance_key}`, {
-    method: "POST",
-    body: form,
-  });
-  assert.equal(res.status, 201);
-  const job = await MessageJob.findByPk((await res.json()).data.id);
-
-  // Simulasikan mati mendadak tepat setelah worker mengklaim (claimed_at masih segar).
-  await job.update({ status: "sending", claimed_at: new Date(), attempts: 1 });
-
-  // Tahan instance agar worker tidak langsung mengirim — kita ingin melihat status
-  // hasil pemulihan, bukan hasil pengiriman.
-  instance.status = "disconnected";
-  await queueService.start();
-  await new Promise((r) => setTimeout(r, 50)); // tunggu tick awal dari start() selesai
-  try {
-    await job.reload();
-    assert.equal(job.status, "pending", "job tidak boleh mandek 15 menit setelah restart");
-    assert.equal(job.claimed_at, null);
-    instance.status = "connected";
-    await drainQueue(10);
-    await job.reload();
-    assert.equal(job.status, "sent");
-    assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
-    assert.equal(sent.at(-1).content.caption, "Setelah restart");
-  } finally {
-    instance.status = "connected";
-    await queueService.stop();
-  }
-});
-
-test("restart mendadak saat kirim gambar Inbox: outbox dipulihkan worker", async () => {
-  const jid = "628999900001@s.whatsapp.net";
-  const [chat] = await Chat.findOrCreate({ where: { device_id: device.id, wa_jid: jid } });
-  const agent = await User.findOne({ where: { email: "agen@test.id" } });
-
-  // Ini yang dilakukan controller Inbox SEBELUM memanggil WhatsApp.
-  const staged = await queueService.beginDirectSend({
-    device,
-    to: jid,
-    type: "image",
-    payload: { caption: "Pulihkan", ptt: false },
-    source: "inbox",
-    userId: agent.id,
-    chatId: chat.id,
-    replyTo: null,
-    quoted: { key: { remoteJid: jid, id: "QUOTED1", fromMe: false }, message: { conversation: "kutipan" } },
-    mediaBuffer: PNG_1X1,
-    mimetype: "image/png",
-    filename: "inbox.png",
-  });
-  assert.equal(staged.status, "sending");
-  assert.ok(mediaStore.resolve(device.id, staged.payload.media.disk_name), "file sementara ada sebelum kirim");
-
-  // Proses mati sebelum WhatsApp menerima pesan; service dinyalakan lagi.
-  await queueService.start();
-  await new Promise((r) => setTimeout(r, 50)); // tunggu tick awal dari start() selesai
-  try {
-    await drainQueue(10);
-    await staged.reload();
-    assert.equal(staged.status, "sent");
-    assert.equal(mediaStore.resolve(device.id, staged.payload.media.disk_name), null, "file sementara dibersihkan");
-    assert.equal(Buffer.from(sent.at(-1).content.image).equals(PNG_1X1), true);
-    assert.equal(sent.at(-1).opts.quoted.key.id, "QUOTED1", "kutipan asal ikut dipulihkan");
-
-    const saved = await Message.findByPk(staged.message_id);
-    assert.equal(saved.body, "[Gambar] Pulihkan");
-    assert.equal(saved.media_filename, "inbox.png");
-    assert.equal(saved.chat_id, chat.id, "pesan tetap masuk ke chat asal");
-    assert.equal(saved.sent_by_user_id, agent.id, "pengirim asal tetap tercatat");
-  } finally {
-    await queueService.stop();
-  }
-});
-
-test("Inbox: gambar ditulis sebagai outbox lebih dulu, lalu ditutup saat terkirim", async () => {
-  const [chat] = await Chat.findOrCreate({
-    where: { device_id: device.id, wa_jid: "628999900002@s.whatsapp.net" },
-  });
-  const before = await MessageJob.count({ where: { source: "inbox" } });
-
-  const form = new FormData();
-  form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "live.png");
-  form.append("caption", "Langsung");
-  const res = await fetch(`${base}/api/chats/${chat.id}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${agentToken}` },
-    body: form,
-  });
-  assert.equal(res.status, 201);
-
-  const jobs = await MessageJob.findAll({ where: { source: "inbox" }, order: [["createdAt", "DESC"]] });
-  assert.equal(jobs.length, before + 1, "satu outbox dibuat untuk kirim gambar Inbox");
-  assert.equal(jobs[0].status, "sent");
-  assert.equal(jobs[0].payload.caption, "Langsung");
-  assert.equal(jobs[0].payload.chat_id, chat.id);
-  assert.ok(jobs[0].message_id);
-  assert.equal(mediaStore.resolve(device.id, jobs[0].payload.media.disk_name), null);
-});
-
-test("antrean: daftar, statistik, jadwal masa depan, batal, dan ulang (admin)", async () => {
-  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  const queued = await call("POST", `/api/message/queue?key=${device.instance_key}`, {
-    body: { id: "0811222777", message: "nanti", scheduled_at: future },
-  });
-  assert.equal(queued.status, 201);
-
-  await queueService._tick();
-  assert.equal((await MessageJob.findByPk(queued.body.data.id)).status, "pending", "jadwal masa depan belum dikirim");
-
-  const stats = await call("GET", `/api/devices/${device.id}/jobs/stats`, { token: agentToken });
-  assert.equal(stats.status, 200);
-  assert.ok(stats.body.data.counts.pending >= 1);
-  assert.equal(stats.body.data.limits.hourly, 0);
-  assert.equal(stats.body.data.usage.last_day >= 4, true);
-
-  const list = await call("GET", `/api/devices/${device.id}/jobs?status=pending`, { token: agentToken });
-  assert.equal(list.status, 200);
-  assert.ok(list.body.data.some((j) => j.id === queued.body.data.id));
-
-  assert.equal((await call("DELETE", `/api/jobs/${queued.body.data.id}`, { token: agentToken })).status, 403);
-  assert.equal((await call("DELETE", `/api/jobs/${queued.body.data.id}`, { token: adminToken })).status, 200);
-  assert.equal((await MessageJob.findByPk(queued.body.data.id)).status, "cancelled");
-
-  const retry = await call("POST", `/api/jobs/${queued.body.data.id}/retry`, { token: adminToken });
-  assert.equal(retry.status, 200);
-  assert.equal(retry.body.data.status, "pending");
-  assert.equal(retry.body.data.attempts, 0);
-
-  await call("DELETE", `/api/jobs/${queued.body.data.id}`, { token: adminToken });
-  assert.equal((await call("POST", `/api/jobs/${queued.body.data.id}/retry`, { token: "bukan-jwt" })).status, 401);
 });
 
 test("socket.io: wajib JWT, menerima message:new di room device", async (t) => {
@@ -1318,7 +808,7 @@ test("start terbatas: retry otomatis maksimal 3x lalu berhenti + cooldown", asyn
   a.stop(); // bersihkan timer & status
 });
 
-test("hapus device: hanya admin, membersihkan chat/pesan/rule", async () => {
+test("hapus device: hanya admin, membersihkan chat/pesan", async () => {
   assert.equal((await call("DELETE", `/api/devices/${device.id}`, { token: agentToken })).status, 403);
   assert.equal((await call("DELETE", `/api/devices/${device.id}`, { token: adminToken })).status, 200);
   assert.equal(await Device.count({ where: { id: device.id } }), 0);
@@ -1327,73 +817,34 @@ test("hapus device: hanya admin, membersihkan chat/pesan/rule", async () => {
   assert.equal((await call("GET", `/api/devices/${device.id}/qr`, { token: adminToken })).status, 404);
 });
 
-test("manajemen user: buat, penugasan device, dan hapus", async () => {
+test("manajemen user: buat, ubah, dan hapus", async () => {
   const created = await call("POST", "/api/users", {
     token: adminToken,
-    body: { name: "Agen Dua", email: "agen2@test.id", password: "rahasia123", role: "agent", device_ids: [] },
+    body: { name: "Agen Dua", email: "agen2@test.id", password: "rahasia123", role: "agent" },
   });
   assert.equal(created.status, 201);
   assert.equal(created.body.data.role, "agent");
   const uid = created.body.data.id;
 
-  // email duplikat ditolak, password pendek ditolak
+  // email duplikat ditolak, password pendek ditolak, hanya admin yang boleh mengakses
   assert.equal((await call("POST", "/api/users", { token: adminToken, body: { name: "X", email: "agen2@test.id", password: "rahasia123" } })).status, 409);
   assert.equal((await call("POST", "/api/users", { token: adminToken, body: { name: "X", email: "x@x.id", password: "123" } })).status, 400);
-  // hanya admin
   assert.equal((await call("GET", "/api/users", { token: agentToken })).status, 403);
 
-  // device baru + penugasan
-  const dev = await call("POST", "/api/devices", { token: adminToken, body: { name: "Dev ACL" } });
-  const deviceId = dev.body.data.id;
-  const updated = await call("PUT", `/api/users/${uid}`, { token: adminToken, body: { device_ids: [deviceId] } });
-  assert.deepEqual(updated.body.data.device_ids, [deviceId]);
-
+  // semua user boleh melihat semua device
   const agen2Token = (await call("POST", "/api/auth/login", { body: { email: "agen2@test.id", password: "rahasia123" } })).body.token;
-  // agent hanya melihat device yang ditugaskan, dan chat device lain = 404 (bukan 403)
-  const list = await call("GET", "/api/devices", { token: agen2Token });
-  assert.deepEqual(list.body.data.map((d) => d.id), [deviceId]);
-  assert.equal((await call("GET", `/api/devices/${deviceId}/chats`, { token: agen2Token })).status, 200);
-  const other = await call("POST", "/api/devices", { token: adminToken, body: { name: "Dev Lain" } });
-  assert.equal((await call("GET", `/api/devices/${other.body.data.id}/chats`, { token: agen2Token })).status, 404);
+  assert.ok((await call("GET", "/api/devices", { token: agen2Token })).body.data.length > 0);
 
-  // Admin juga bisa dibatasi per device; admin TANPA penugasan = akses penuh.
-  const admin2 = await call("POST", "/api/users", {
-    token: adminToken,
-    body: { name: "Admin Cabang", email: "admin2@test.id", password: "rahasia123", role: "admin", device_ids: [deviceId] },
-  });
-  assert.equal(admin2.status, 201);
-  const admin2Token = (await call("POST", "/api/auth/login", { body: { email: "admin2@test.id", password: "rahasia123" } })).body.token;
-  const scoped = await call("GET", "/api/devices", { token: admin2Token });
-  assert.deepEqual(scoped.body.data.map((d) => d.id), [deviceId], "admin dengan penugasan hanya melihat device itu");
-  assert.equal((await call("GET", `/api/devices/${other.body.data.id}/chats`, { token: admin2Token })).status, 404);
-  assert.equal((await call("PUT", `/api/devices/${other.body.data.id}`, { token: admin2Token, body: { name: "X" } })).status, 404);
-  assert.equal((await call("DELETE", `/api/devices/${other.body.data.id}`, { token: admin2Token })).status, 404);
-  // device yang ia buat otomatis jadi miliknya
-  const madeByScoped = await call("POST", "/api/devices", { token: admin2Token, body: { name: "Buat Sendiri" } });
-  assert.equal(madeByScoped.status, 201);
-  assert.equal((await call("GET", `/api/devices/${madeByScoped.body.data.id}/qr`, { token: admin2Token })).status, 200);
-  await call("DELETE", `/api/devices/${madeByScoped.body.data.id}`, { token: admin2Token });
-
-  // agent TANPA penugasan tidak melihat device apa pun
-  const agen3 = await call("POST", "/api/users", {
-    token: adminToken,
-    body: { name: "Agen Tanpa Device", email: "agen3@test.id", password: "rahasia123", role: "agent" },
-  });
-  assert.equal(agen3.status, 201);
-  const agen3Token = (await call("POST", "/api/auth/login", { body: { email: "agen3@test.id", password: "rahasia123" } })).body.token;
-  assert.deepEqual((await call("GET", "/api/devices", { token: agen3Token })).body.data, []);
-
-  // Hapus admin2 dulu agar admin utama jadi satu-satunya, lalu uji proteksi admin-terakhir.
-  assert.equal((await call("DELETE", `/api/users/${admin2.body.data.id}`, { token: adminToken })).status, 200);
+  // ubah nama dan role
+  const updated = await call("PUT", `/api/users/${uid}`, { token: adminToken, body: { name: "Agen Diubah", role: "admin" } });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.data.name, "Agen Diubah");
+  assert.equal(updated.body.data.role, "admin");
 
   // admin terakhir tidak boleh diturunkan/dihapus
+  assert.equal((await call("DELETE", `/api/users/${uid}`, { token: adminToken })).status, 200);
   const adminUser = await User.findOne({ where: { email: "admin@test.id" } });
   assert.equal((await call("PUT", `/api/users/${adminUser.id}`, { token: adminToken, body: { role: "agent" } })).status, 409);
   assert.equal((await call("DELETE", `/api/users/${adminUser.id}`, { token: adminToken })).status, 409);
-
-  assert.equal((await call("DELETE", `/api/users/${uid}`, { token: adminToken })).status, 200);
-  assert.equal((await call("DELETE", `/api/users/${agen3.body.data.id}`, { token: adminToken })).status, 200);
-  assert.equal((await call("DELETE", `/api/devices/${deviceId}`, { token: adminToken })).status, 200);
-  assert.equal((await call("DELETE", `/api/devices/${other.body.data.id}`, { token: adminToken })).status, 200);
 });
 

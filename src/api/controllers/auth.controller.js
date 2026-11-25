@@ -2,7 +2,6 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const config = require("../../config/config");
 const { User } = require("../models");
-const roleAccess = require("../services/roleAccess");
 
 // Hash palsu agar waktu respons sama baik user ada maupun tidak
 const DUMMY_HASH = bcrypt.hashSync("tidak-dipakai", 10);
@@ -25,13 +24,10 @@ async function login(req, res) {
     expiresIn: config.jwt.expiresIn,
   });
 
-  const access = await roleAccess.resolveForUser(user);
-  const userData = { id: user.id, name: user.name, email: user.email, role: user.role, permissions: access.permissions, permission_overrides: access.overrides };
-
   res.json({
     error: false,
     token,
-    user: userData,
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 }
 
