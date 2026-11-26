@@ -10,6 +10,14 @@ const Icon = ({ d }) => (
 
 const FONT_KEY = "wa_font_small";
 
+const initials = (name) =>
+  (name || "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() || "")
+    .join("") || "?";
+
 export default function Layout() {
   const { user, logout } = useAuth();
   // Mode font kecil (A-) — pilihan tersimpan dan diterapkan ke seluruh halaman.
@@ -59,6 +67,14 @@ export default function Layout() {
           <span>WA Dashboard</span>
         </div>
 
+        <div className="profile-card">
+          <span className="avatar profile-avatar">{initials(user?.name)}</span>
+          <div className="profile-meta">
+            <div className="profile-name">{user?.name}</div>
+            <div className="profile-role">{user?.role === "admin" ? "Admin" : "Agent"}</div>
+          </div>
+        </div>
+
         <nav className="nav">
           <NavLink to="/" end aria-label="Inbox" title="Inbox" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Icon d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
@@ -81,11 +97,8 @@ export default function Layout() {
         </nav>
 
         <div className="sidebar-foot">
-          <div className="who">
-            <div className="who-name">{user?.name}</div>
-            <div className="who-meta">
-              {user?.email} · {user?.role}
-            </div>
+          <div className="who-meta">
+            {user?.email}
           </div>
           <div className="foot-actions">
             <button
