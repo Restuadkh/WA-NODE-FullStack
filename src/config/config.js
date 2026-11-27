@@ -76,6 +76,12 @@ module.exports = {
     urlExpiryMs: int(process.env.MEDIA_URL_EXPIRY_HOURS, 168) * 60 * 60 * 1000,
   },
 
+  // Formulir kontak publik: pesan disimpan sebagai JSONL di luar folder statis.
+  contact: {
+    dir: process.env.CONTACT_DIR || path.join(__dirname, "../data/contact"),
+    hashSecret: process.env.JWT_SECRET || "",
+  },
+
   webhook: {
     url: process.env.WEBHOOK_URL || "",
     events: list(process.env.WEBHOOK_ALLOWED_EVENTS, ["all"]),

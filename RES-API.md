@@ -230,3 +230,42 @@ Bila secret diisi, header `X-Signature: sha256=<hex>` berisi HMAC-SHA256 dari bo
 ## 6. Endpoint yang dihapus di v3.0
 
 `/api/message/queue*`, `/api/message/mediaurl`, `/api/devices/:id/contacts*`, `/api/devices/:id/rules`, `/api/roles/*`, `/api/users/:id/permissions`, dan `/api/cron/redial` sudah tidak tersedia. Lihat **[CHANGELOG.md](CHANGELOG.md)**.
+
+---
+
+## 7. Endpoint publik (tanpa login)
+
+### 7.1 Formulir kontak
+
+| Method | Path | Akses | Fungsi |
+|---|---|---|---|
+| POST | `/api/contact` | publik | Terima pesan pengunjung situs publik |
+
+- **Rate limit**: maks 5 request / 15 menit per IP (`429` bila lebih).
+- **Honeypot**: field `website` harus kosong; bila terisi dianggap bot (`400`).
+- **Validasi** (`400` + daftar `fields`): `name` ≥ 2 karakter, `email` format valid, `subject` ≥ 3 karakter, `message` ≥ 10 karakter. Karakter kontrol dibuang dan panjang dipotong (`name` 100, `email` 254, `subject` 150, `message` 2000).
+
+Contoh request:
+
+```json
+{
+  "name": "Budi",
+  "email": "budi@contoh.id",
+  "subject": "Pertanyaan layanan",
+  "message": "Halo, saya ingin bertanya tentang device WhatsApp."
+}
+```
+
+Respons sukses `201`:
+
+```json
+{
+  "ok": true,
+  "id": "<uuid>",
+  "message": "Pesan tersimpan. Gunakan nomor referensi berikut untuk tindak lanjut."
+}
+```
+
+Pesan disimpan sebagai satu baris JSONL per pesan pada `CONTACT_DIR` (default `src/data/contact/messages.jsonl`, di luar folder statis). Setiap baris memuat `id`, `createdAt`, data formulir yang sudah dibersihkan, dan `ipHash` (HMAC-SHA256 24 karakter dari IP, kunci `JWT_SECRET`) — IP asli tidak disimpan. Belum ada notifikasi email otomatis.
+
+Endpoint pendukung situs publik yang juga tanpa login: `GET /robots.txt` dan `GET /sitemap.xml` (mengikuti host yang dipakai pengunjung).

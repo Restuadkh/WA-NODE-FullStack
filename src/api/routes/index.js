@@ -11,6 +11,7 @@ const devices = require("../controllers/devices.controller");
 const chats = require("../controllers/chats.controller");
 const gateway = require("../controllers/gateway.controller");
 const users = require("../controllers/users.controller");
+const contact = require("../controllers/contact.controller");
 
 const router = express.Router();
 const admin = requireRole("admin");
@@ -25,6 +26,9 @@ const upload = multer(uploadOptions).single("file");
 const chatUpload = multer(uploadOptions).single("file");
 
 router.get("/status", (req, res) => res.json({ status: "ok" }));
+
+// ---- Formulir kontak publik (maks 5 pesan / 15 menit per IP)
+router.post("/contact", rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), contact.submit);
 
 // ---- Login (maks 10 percobaan / 15 menit per IP)
 router.post("/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), auth.login);

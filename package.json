@@ -1,6 +1,6 @@
 {
   "name": "wa-dashboard-backend",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "WhatsApp gateway + dashboard backend (Baileys, Express, Sequelize, socket.io)",
   "main": "src/server.js",
   "private": true,
@@ -16,7 +16,7 @@
     "db:reset": "node src/scripts/syncDb.js --force",
     "seed:admin": "node src/scripts/seedAdmin.js",
     "seed:user": "node src/scripts/seedUser.js",
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.js\"",
     "db:upgrade": "node src/scripts/dbUpgrade.js",
     "lint": "eslint .",
     "audit:prod": "npm audit --omit=dev",

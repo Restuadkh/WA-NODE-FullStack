@@ -48,6 +48,9 @@ export default function Login() {
         <button className="btn btn-primary btn-block" disabled={busy}>
           {busy ? "Memproses…" : "Masuk"}
         </button>
+        <p className="small muted" style={{ marginTop: 16, marginBottom: 0, textAlign: "center" }}>
+          <a href="/">Kembali ke situs publik</a>
+        </p>
       </form>
     </div>
   );

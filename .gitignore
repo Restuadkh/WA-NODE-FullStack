@@ -7,6 +7,7 @@ auth/
 auth_*/
 src/auth/
 src/media/
+src/data/
 logs/
 *.log
 *.pem

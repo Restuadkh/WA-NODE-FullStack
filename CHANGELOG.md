@@ -2,6 +2,23 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [3.1.0] — 2026-11-27
+
+### Ditambah — situs publik + formulir kontak
+- **Situs publik tanpa login** di frontend: `/`, `/tentang-kami`, `/kebijakan-privasi`, `/syarat-ketentuan`, `/kebijakan-refund`, `/kebijakan-pembatalan`, `/hubungi-kami`, `/faq`, plus halaman 404. Layout baru (`PublicLayout`) dengan navigasi, breadcrumb, footer, menu mobile, dan metadata SEO per halaman (`usePageMeta`: title, description, Open Graph, canonical).
+- **Dashboard dipindah ke `/dashboard`** (sebelumnya `/`) agar root dipakai situs publik; `/users` kini redirect ke `/dashboard` untuk non-admin. Tautan "Kembali ke situs publik" ditambahkan di halaman login.
+- **`POST /api/contact`** — formulir kontak publik: rate limit 5 request/15 menit per IP, honeypot field `website`, validasi panjang/format, dan pembersihan karakter kontrol. Pesan disimpan sebagai JSONL di `CONTACT_DIR` (default `src/data/contact`, di luar folder statis) dengan `ipHash` HMAC-SHA256 — IP asli tidak disimpan. Belum ada kirim email otomatis.
+- **SEO teknis**: `GET /robots.txt` dan `GET /sitemap.xml` mengikuti host pengunjung; favicon `frontend/public/favicon.svg`; meta description/Open Graph di `frontend/index.html`.
+- Dokumentasi baru **[MERCHANT-READINESS.md](MERCHANT-READINESS.md)** (checklist verifikasi merchant) dan bagian "Situs publik & halaman legal" di `README.md`; referensi `POST /api/contact` ditambahkan ke **[RES-API.md](RES-API.md)**.
+
+### Diperbaiki
+- **`npm test` gagal di Windows/Git Bash**: `node --test test/` melempar `MODULE_NOT_FOUND`; skrip kini memakai glob `node --test "test/**/*.test.js"`.
+- **ESLint**: regex karakter kontrol di `contact.controller.js` tidak lagi memicu `no-control-regex` (diganti helper `stripControls`), sehingga `npm run lint` bersih.
+
+### 🧪 Tes
+- Tes baru: formulir kontak (validasi, honeypot, isi JSONL + `ipHash`) dan `robots.txt`/`sitemap.xml`. **31 tes, semuanya lolos.**
+- Frontend berhasil di-build (`vite build`, 86 modul).
+
 ## [3.0.0] — 2026-11-25
 
 ### Diubah — versi ramping (breaking)

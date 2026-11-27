@@ -14,6 +14,7 @@ Object.assign(process.env, {
   WHATSAPP_ENABLED: "false",
   AUTH_DIR: authDir,
   MEDIA_DIR: path.join(authDir, "media"),
+  CONTACT_DIR: path.join(authDir, "contact"),
   WEBHOOK_URL: "",
   PROTECT_ROUTES: "false",
   LOG_LEVEL: "silent",
@@ -120,6 +121,43 @@ test("health dan 404 JSON", async () => {
   const nf = await call("GET", "/api/tidak-ada");
   assert.equal(nf.status, 404);
   assert.equal(nf.body.error, true);
+});
+
+test("formulir kontak publik: validasi, honeypot, dan penyimpanan", async () => {
+  const invalid = await call("POST", "/api/contact", { body: { name: "A", email: "bukan-email", subject: "x", message: "pendek" } });
+  assert.equal(invalid.status, 400);
+  assert.ok(invalid.body.fields.length >= 3);
+
+  const bot = await call("POST", "/api/contact", {
+    body: { name: "Bot", email: "bot@test.id", subject: "Spam", message: "pesan yang cukup panjang", website: "https://spam.test" },
+  });
+  assert.equal(bot.status, 400);
+
+  const ok = await call("POST", "/api/contact", {
+    body: { name: "Pelanggan", email: "Pelanggan@Test.id", subject: "Pertanyaan layanan", message: "Halo, saya ingin bertanya tentang device WhatsApp." },
+  });
+  assert.equal(ok.status, 201);
+  assert.ok(ok.body.id);
+  const stored = fs.readFileSync(path.join(process.env.CONTACT_DIR, "messages.jsonl"), "utf8");
+  const record = JSON.parse(stored.trim().split("\n").at(-1));
+  assert.equal(record.email, "pelanggan@test.id");
+  assert.equal(record.id, ok.body.id);
+  assert.ok(record.ipHash && record.ipHash.length === 24);
+});
+
+test("robots.txt dan sitemap.xml dapat diakses publik", async () => {
+  const robots = await fetch(base + "/robots.txt");
+  assert.equal(robots.status, 200);
+  const robotsText = await robots.text();
+  assert.match(robotsText, /Allow: \//);
+  assert.match(robotsText, /Sitemap: .*\/sitemap\.xml/);
+
+  const sitemap = await fetch(base + "/sitemap.xml");
+  assert.equal(sitemap.status, 200);
+  const xml = await sitemap.text();
+  assert.match(xml, /<urlset/);
+  assert.match(xml, /\/kebijakan-privasi/);
+  assert.match(xml, /\/hubungi-kami/);
 });
 
 test("login: salah, benar, dan akses tanpa token", async () => {

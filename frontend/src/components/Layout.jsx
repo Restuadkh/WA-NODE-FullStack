@@ -76,7 +76,7 @@ export default function Layout() {
         </div>
 
         <nav className="nav">
-          <NavLink to="/" end aria-label="Inbox" title="Inbox" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <NavLink to="/dashboard" end aria-label="Inbox" title="Inbox" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Icon d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
             <span>Inbox</span>
           </NavLink>

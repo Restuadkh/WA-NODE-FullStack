@@ -6,6 +6,12 @@ import Devices from "./pages/Devices";
 import Inbox from "./pages/Inbox";
 import Users from "./pages/Users";
 import ApiDocs from "./pages/ApiDocs";
+import PublicLayout from "./public/PublicLayout";
+import Home from "./public/pages/Home";
+import { About, Cancellation, Privacy, Refund, Terms } from "./public/pages/LegalPages";
+import Contact from "./public/pages/Contact";
+import Faq from "./public/pages/Faq";
+import NotFound from "./public/pages/NotFound";
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -17,7 +23,9 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+
+      {/* Dashboard existing tetap berjalan; hanya dipindah ke /dashboard agar / bisa dipakai publik. */}
       <Route
         element={
           <Protected>
@@ -25,12 +33,24 @@ export default function App() {
           </Protected>
         }
       >
-        <Route path="/" element={<Inbox />} />
+        <Route path="/dashboard" element={<Inbox />} />
         <Route path="/devices" element={<Devices />} />
-        <Route path="/users" element={user?.role === "admin" ? <Users /> : <Navigate to="/" replace />} />
+        <Route path="/users" element={user?.role === "admin" ? <Users /> : <Navigate to="/dashboard" replace />} />
         <Route path="/api-docs" element={<ApiDocs />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+
+      {/* Situs publik: dapat diakses tanpa login, termasuk oleh tim verifikasi payment gateway. */}
+      <Route element={<PublicLayout />}>
+        <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Home />} />
+        <Route path="/tentang-kami" element={<About />} />
+        <Route path="/kebijakan-privasi" element={<Privacy />} />
+        <Route path="/syarat-ketentuan" element={<Terms />} />
+        <Route path="/kebijakan-refund" element={<Refund />} />
+        <Route path="/kebijakan-pembatalan" element={<Cancellation />} />
+        <Route path="/hubungi-kami" element={<Contact />} />
+        <Route path="/faq" element={<Faq />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
     </Routes>
   );
 }

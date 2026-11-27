@@ -17,6 +17,17 @@ Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersam
 - Webhook keluar (opsional, HMAC-SHA256) untuk pesan masuk, update status pesan, dan status koneksi — **per device** dengan fallback `WEBHOOK_URL` global
 - **Halaman Dok API** di dashboard: ringkasan `/api/message/*` beserta contoh request/response (detail di **[RES-API.md](RES-API.md)**)
 
+## Situs publik & halaman legal
+Selain dashboard (login), build frontend menyediakan halaman yang dapat diakses tanpa login:
+`/`, `/tentang-kami`, `/kebijakan-privasi`, `/syarat-ketentuan`, `/kebijakan-refund`,
+`/kebijakan-pembatalan`, `/hubungi-kami`, dan `/faq`. Dashboard tetap tersedia di `/dashboard`,
+`/devices`, `/users`, dan `/api-docs`.
+
+Formulir kontak memakai `POST /api/contact` dan menyimpan pesan sebagai JSONL pada `CONTACT_DIR`
+(default `src/data/contact`, di luar folder statis). Belum ada notifikasi email otomatis.
+Data usaha yang belum tersedia (nama badan hukum, alamat, email, telepon, WhatsApp, jam operasional)
+dan checklist verifikasi merchant ada di **[MERCHANT-READINESS.md](MERCHANT-READINESS.md)**.
+
 ## Instalasi
 ```bash
 cp .env.example .env            # isi JWT_SECRET (openssl rand -hex 48) dan kredensial MySQL
