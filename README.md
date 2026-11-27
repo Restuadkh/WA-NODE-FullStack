@@ -1,6 +1,6 @@
 # WA Dashboard
 
-Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersama tim secara realtime, dan API kirim pesan untuk aplikasi lain. Riwayat perubahan: **[CHANGELOG.md](CHANGELOG.md)**.
+Gateway WhatsApp (Baileys) dengan dashboard web: kelola nomor, balas chat bersama tim secara realtime, dan API kirim pesan untuk aplikasi lain. Riwayat perubahan: **[CHANGELOG.md](CHANGELOG.md)**. Rencana pengembangan: **[ROADMAP.md](ROADMAP.md)**.
 
 - **Backend**: Node.js ≥ 20, Express 5, Sequelize (MySQL/MariaDB), socket.io, Baileys
 - **Frontend**: React + Vite di `frontend/` (build butuh Node ≥ 20.19; hasil build disajikan backend, satu proses satu port)
