@@ -26,7 +26,7 @@ Selain dashboard (login), build frontend menyediakan halaman yang dapat diakses 
 Formulir kontak memakai `POST /api/contact` dan menyimpan pesan sebagai JSONL pada `CONTACT_DIR`
 (default `src/data/contact`, di luar folder statis). Belum ada notifikasi email otomatis.
 Data usaha yang belum tersedia (nama badan hukum, alamat, email, telepon, WhatsApp, jam operasional)
-dan checklist verifikasi merchant ada di **[MERCHANT-READINESS.md](MERCHANT-READINESS.md)**.
+dan catatan keamanan ada di **[SECURITY-NOTES.md](SECURITY-NOTES.md)**.
 
 ## Instalasi
 ```bash

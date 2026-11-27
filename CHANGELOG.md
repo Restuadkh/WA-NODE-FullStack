@@ -9,7 +9,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
 - **Dashboard dipindah ke `/dashboard`** (sebelumnya `/`) agar root dipakai situs publik; `/users` kini redirect ke `/dashboard` untuk non-admin. Tautan "Kembali ke situs publik" ditambahkan di halaman login.
 - **`POST /api/contact`** — formulir kontak publik: rate limit 5 request/15 menit per IP, honeypot field `website`, validasi panjang/format, dan pembersihan karakter kontrol. Pesan disimpan sebagai JSONL di `CONTACT_DIR` (default `src/data/contact`, di luar folder statis) dengan `ipHash` HMAC-SHA256 — IP asli tidak disimpan. Belum ada kirim email otomatis.
 - **SEO teknis**: `GET /robots.txt` dan `GET /sitemap.xml` mengikuti host pengunjung; favicon `frontend/public/favicon.svg`; meta description/Open Graph di `frontend/index.html`.
-- Dokumentasi baru **[MERCHANT-READINESS.md](MERCHANT-READINESS.md)** (checklist verifikasi merchant) dan bagian "Situs publik & halaman legal" di `README.md`; referensi `POST /api/contact` ditambahkan ke **[RES-API.md](RES-API.md)**.
+- Dokumentasi baru **[SECURITY-NOTES.md](SECURITY-NOTES.md)** (catatan keamanan) dan bagian "Situs publik & halaman legal" di `README.md`; referensi `POST /api/contact` ditambahkan ke **[RES-API.md](RES-API.md)**.
 
 ### Diperbaiki
 - **`npm test` gagal di Windows/Git Bash**: `node --test test/` melempar `MODULE_NOT_FOUND`; skrip kini memakai glob `node --test "test/**/*.test.js"`.
