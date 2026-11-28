@@ -257,6 +257,7 @@ async function sendMessage(req, res) {
           "VERSION:3.0",
           `FN:${name || digits}`,
           `TEL;TYPE=CELL:+${digits}`,
+          `URL:https://wa.me/${digits}`,
           "END:VCARD",
         ].join("\n"),
       });

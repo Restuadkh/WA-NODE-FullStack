@@ -720,6 +720,17 @@ export default function Inbox() {
                                   }
                                 />
                                 <span>{c.name ? `${c.name} (${c.phone})` : c.phone}</span>
+                                {c.phone && (
+                                  <a
+                                    className="small"
+                                    href={`https://wa.me/${String(c.phone).replace(/\D/g, "")}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    wa.me
+                                  </a>
+                                )}
                               </label>
                             ))}
                         </div>

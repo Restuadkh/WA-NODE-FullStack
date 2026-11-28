@@ -221,6 +221,7 @@ export default function Contacts() {
                 <td className="small muted">{fmt(c.updated_at || c.created_at)}</td>
                 <td>
                   <div className="actions">
+                    {c.phone && <a className="btn btn-sm" href={`https://wa.me/${String(c.phone).replace(/\D/g, "")}`} target="_blank" rel="noreferrer">WA.me</a>}
                     <button className="btn btn-sm" onClick={() => openChat(c)}>Chat</button>
                     <button className="btn btn-primary btn-sm" onClick={() => setSendContact(c)}>Kirim</button>
                   </div>
