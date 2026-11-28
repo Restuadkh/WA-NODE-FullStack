@@ -1,3 +1,4 @@
+const { Op } = require("sequelize");
 const { Chat, Message } = require("../models");
 const { emitToDevice } = require("./realtime");
 const logger = require("./logger");
@@ -105,11 +106,44 @@ function parseMedia(rawMessage) {
 }
 
 
+async function resolveCanonicalJid(device, jid) {
+  if (!jid || String(jid).endsWith("@g.us") || String(jid).endsWith("@s.whatsapp.net")) return jid;
+  if (!String(jid).endsWith("@lid")) return jid;
+  try {
+    const { ContactName } = require("../models");
+    const { phoneFromJid, normalizePhoneDigits } = require("../whatsapp/jid");
+    const row = await ContactName.findOne({
+      where: { device_id: device.id, lid_user: jid, from_jid: { [Op.ne]: null } },
+      attributes: ["from_jid"],
+    });
+    const phone = normalizePhoneDigits(phoneFromJid(row?.from_jid));
+    if (phone) return `${phone}@s.whatsapp.net`;
+  } catch {
+    // fallback ke jid asli
+  }
+  return jid;
+}
+
 async function findOrCreateChat(device, jid, defaults = {}) {
-  const [chat] = await Chat.findOrCreate({
-    where: { device_id: device.id, wa_jid: jid },
-    defaults: { is_group: jid.endsWith("@g.us"), ...defaults },
-  });
+  const canonical = await resolveCanonicalJid(device, jid);
+  let chat = await Chat.findOne({ where: { device_id: device.id, wa_jid: canonical } });
+  if (!chat && canonical !== jid) {
+    // Jika chat lama masih pakai LID, pakai itu agar riwayat tidak terpisah.
+    chat = await Chat.findOne({ where: { device_id: device.id, wa_jid: jid } });
+    if (chat && !chat.is_group) {
+      const existingCanonical = await Chat.findOne({ where: { device_id: device.id, wa_jid: canonical } });
+      if (!existingCanonical) {
+        await chat.update({ wa_jid: canonical }).catch(() => {});
+      }
+    }
+  }
+  if (!chat) {
+    const [created] = await Chat.findOrCreate({
+      where: { device_id: device.id, wa_jid: canonical },
+      defaults: { is_group: String(canonical).endsWith("@g.us"), ...defaults },
+    });
+    chat = created;
+  }
   return chat;
 }
 
@@ -194,7 +228,7 @@ async function storeMessage({
   await chat.update(patch);
 
   cache.invalidate(`chats:${device.id}`);
-  cache.invalidatePrefix(`messages:${chat.id}:`);
+  cache.invalidateMatching((k) => k.startsWith("messages:") && k.includes(chat.id));
   emitToDevice(device.id, "message:new", { chat_id: chat.id, message });
   return { message, created: true };
 }

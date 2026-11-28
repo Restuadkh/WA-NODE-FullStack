@@ -21,6 +21,11 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
 - **Dedupe/update kontak**: nomor/LID yang sama tidak membuat baris ganda; jika kontak sudah ada, data yang berubah (terutama `notify`/nama) diperbarui. Nama kontak juga disinkronkan ke `Chat.contact_name` agar tampil di inbox.
 - **Identitas inbox**: daftar chat/pesan kini memperkaya identitas dari tabel kontak (nomor, LID, notify/nama) sehingga chat yang memakai LID atau punya notify baru bisa ditampilkan lebih konsisten.
 
+### Diperbaiki — Penggabungan chat nomor sama
+- **Chat nomor sama digabung di inbox**: chat dengan nomor telepon yang sama (mis. tersimpan sebagai `@s.whatsapp.net` dan `@lid`) digabung menjadi satu item di daftar chat, dengan unread count dijumlahkan dan identitas terbaik (nama/notify/nomor/LID) dipertahankan.
+- **Riwayat pesan digabung**: endpoint pesan chat kini mengambil pesan dari chat-chat terkait nomor/LID yang sama, sehingga riwayat tidak terpisah saat WhatsApp memakai JID/LID berbeda.
+- **Mark read & cache**: `markRead` menandai semua chat terkait nomor yang sama sebagai terbaca; invalidasi cache pesan diperluas agar cache gabungan tidak stale.
+
 ### 🧪 Tes
 - Frontend berhasil di-build (`npm --prefix frontend run build`, Vite, 86 modul).
 - Backend lulus `node --check` untuk controller/service terkait dan `npm run lint` pada file yang diubah.

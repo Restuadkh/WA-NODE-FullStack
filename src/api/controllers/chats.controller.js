@@ -6,6 +6,7 @@ const { phoneFromJid, normalizePhoneDigits } = require("../whatsapp/jid");
 const mediaStore = require("../services/mediaStore");
 const { assertDeviceAccess } = require("../services/deviceAccess");
 const cache = require("../services/cache");
+const { relatedChatIds } = require("../services/chatIdentity");
 
 const httpError = require("../services/httpError");
 const config = require("../../config/config");
@@ -34,7 +35,6 @@ async function listChats(req, res) {
       order: [["last_message_at", "DESC"]],
       limit: 500,
     });
-    // Petakan LID/nama kontak dari tabel numbers agar inbox menampilkan identitas yang konsisten.
     const jids = chats.map((c) => c.wa_jid).filter(Boolean);
     const lidJids = jids.filter((j) => String(j).endsWith("@lid"));
     const phoneJids = jids.filter((j) => String(j).endsWith("@s.whatsapp.net"));
@@ -57,7 +57,8 @@ async function listChats(req, res) {
       if (n.from_jid) byJid.set(n.from_jid, n);
     }
 
-    return chats.map((c) => {
+    const merged = new Map();
+    for (const c of chats) {
       const row = c.toJSON();
       const n = byJid.get(c.wa_jid) || byLid.get(c.wa_jid) || null;
       const phone = n?.from_jid ? phoneFromJid(n.from_jid) : phoneFromJid(c.wa_jid);
@@ -65,7 +66,41 @@ async function listChats(req, res) {
       row.lid = n?.lid_user || (String(c.wa_jid).endsWith("@lid") ? c.wa_jid : null);
       row.notify = n?.notify || null;
       if (!row.contact_name && n?.notify) row.contact_name = n.notify;
-      return row;
+
+      // Gabungkan chat yang nomor sama (mis. @lid dan @s.whatsapp.net) agar inbox tidak dobel.
+      const key = row.is_group ? `g:${row.id}` : row.phone ? `p:${normalizePhoneDigits(row.phone)}` : `j:${row.wa_jid}`;
+      const prev = merged.get(key);
+      if (!prev) {
+        merged.set(key, { ...row, merged_chat_ids: [row.id] });
+        continue;
+      }
+      prev.merged_chat_ids.push(row.id);
+      prev.unread_count = (Number(prev.unread_count) || 0) + (Number(row.unread_count) || 0);
+      const prevAt = prev.last_message_at ? new Date(prev.last_message_at).getTime() : 0;
+      const curAt = row.last_message_at ? new Date(row.last_message_at).getTime() : 0;
+      // Pilih chat terbaru sebagai chat utama, tapi pertahankan identitas terbaik.
+      if (curAt >= prevAt) {
+        merged.set(key, {
+          ...row,
+          contact_name: row.contact_name || prev.contact_name || null,
+          phone: row.phone || prev.phone || null,
+          lid: row.lid || prev.lid || null,
+          notify: row.notify || prev.notify || null,
+          unread_count: prev.unread_count,
+          merged_chat_ids: prev.merged_chat_ids,
+        });
+      } else {
+        prev.contact_name = prev.contact_name || row.contact_name || null;
+        prev.phone = prev.phone || row.phone || null;
+        prev.lid = prev.lid || row.lid || null;
+        prev.notify = prev.notify || row.notify || null;
+      }
+    }
+
+    return [...merged.values()].sort((a, b) => {
+      const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return tb - ta;
     });
   });
 
@@ -86,10 +121,15 @@ async function listMessages(req, res) {
   const beforeRaw = req.query.before ? String(req.query.before) : "";
   const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
   const beforeMs = beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate.getTime() : 0;
-  const cacheKey = `messages:${req.params.chatId}:${limit}:${beforeMs}`;
+
+  const chat = await Chat.findByPk(req.params.chatId, { attributes: ["id", "device_id", "is_group", "wa_jid"] });
+  if (chat) await assertDeviceAccess(req.user, chat.device_id);
+  const chatIds = chat ? await relatedChatIds(chat) : [req.params.chatId];
+  // Key cache harus mencakup semua chatId yang digabung agar tidak bocor/stale.
+  const cacheKey = `messages:${chatIds.slice().sort().join(",")}:${limit}:${beforeMs}`;
 
   const cached = await cache.wrap(cacheKey, MESSAGES_CACHE_TTL, async () => {
-    const where = { chat_id: req.params.chatId };
+    const where = { chat_id: { [Op.in]: chatIds } };
     if (beforeMs) where.createdAt = { [Op.lt]: new Date(beforeMs) };
 
     const rows = await Message.findAll({
@@ -100,13 +140,11 @@ async function listMessages(req, res) {
       ],
       limit,
     });
-    const chat = await Chat.findByPk(req.params.chatId, { attributes: ["device_id", "is_group"] });
-    if (chat) await assertDeviceAccess(req.user, chat.device_id);
 
     // Lengkapi identitas pengirim/pesan dari tabel numbers (nomor/LID/notify).
     let data = rows.reverse().map((r) => r.toJSON());
     const senders = [...new Set(data.map((r) => r.sender_jid).filter(Boolean))];
-    const numbers = senders.length
+    const numbers = senders.length && chat?.device_id
       ? await ContactName.findAll({
           where: {
             device_id: chat.device_id,
@@ -305,10 +343,12 @@ async function sendMessage(req, res) {
 
 async function markRead(req, res) {
   const chat = await findChatWithAccess(req.params.chatId, req.user);
-  if (chat.unread_count) {
-    await chat.update({ unread_count: 0 });
-    cache.invalidate(`chats:${chat.device_id}`);
+  const chatIds = await relatedChatIds(chat);
+  const siblings = await Chat.findAll({ where: { id: { [Op.in]: chatIds } } });
+  for (const c of siblings) {
+    if (c.unread_count) await c.update({ unread_count: 0 });
   }
+  cache.invalidate(`chats:${chat.device_id}`);
 
   // Mode senyap (SEND_READ_RECEIPTS=false): jangan kirim "terbaca" ke WhatsApp —
   // proyek berjalan di belakang layar; badge lokal tetap dibersihkan di atas.

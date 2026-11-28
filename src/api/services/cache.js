@@ -46,8 +46,12 @@ function invalidatePrefix(prefix) {
   for (const k of store.keys()) if (k.startsWith(prefix)) store.delete(k);
 }
 
+function invalidateMatching(predicate) {
+  for (const k of store.keys()) if (predicate(k)) store.delete(k);
+}
+
 function stats() {
   return { entries: store.size };
 }
 
-module.exports = { get, set, wrap, invalidate, invalidatePrefix, stats };
+module.exports = { get, set, wrap, invalidate, invalidatePrefix, invalidateMatching, stats };

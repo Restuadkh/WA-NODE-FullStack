@@ -95,7 +95,7 @@ async function handleIncoming(device, instance, msg, { fromHistory = false } = {
         if (row.edited_from == null) patch.edited_from = row.body;
         if (row.media_caption) patch.media_caption = parsedEdit.body;
         await row.update(patch);
-        cache.invalidatePrefix(`messages:${editChat.id}:`);
+        cache.invalidateMatching((k) => k.startsWith("messages:") && k.includes(editChat.id));
         emitToDevice(device.id, "message:update", {
           chat_id: editChat.id,
           message_id: row.id,
@@ -191,7 +191,7 @@ async function handleStatusUpdates(device, updates) {
 
     const previousStatus = message.status;
     await message.update({ status });
-    cache.invalidatePrefix(`messages:${message.chat_id}:`);
+    cache.invalidateMatching((k) => k.startsWith("messages:") && k.includes(message.chat_id));
     emitToDevice(device.id, "message:update", {
       chat_id: message.chat_id,
       message_id: message.id,
