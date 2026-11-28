@@ -477,7 +477,8 @@ test("kirim kontak: vCard terkirim & tersimpan sebagai pesan [Kontak]", async ()
   assert.ok(last.content?.contacts, "payload contacts Baileys");
   assert.equal(last.content.contacts.displayName, "Test Nomor Baru");
   assert.match(last.content.contacts.contacts[0].vcard, /BEGIN:VCARD/);
-  assert.match(last.content.contacts.contacts[0].vcard, /TEL;TYPE=CELL:\+62896123345667/);
+  assert.match(last.content.contacts.contacts[0].vcard, /TEL;type=CELL;type=VOICE;waid=62896123345667:\+62896123345667/);
+  assert.match(last.content.contacts.contacts[0].vcard, /URL:https:\/\/wa\.me\/62896123345667/);
 
   // Penerima (di sisi WhatsApp) bisa langsung membalas: simulasi pesan masuk dari
   // nomor yang sama setelah menerima kartu kontak — masuk ke chat yang sama.
@@ -513,7 +514,7 @@ test("kirim banyak kontak sekaligus: satu pesan berisi daftar vCard", async () =
   const last = sent.at(-1);
   assert.equal(last.content.contacts.displayName, "3 kontak");
   assert.equal(last.content.contacts.contacts.length, 3, "3 vCard dalam 1 pesan");
-  assert.match(last.content.contacts.contacts[0].vcard, /TEL;TYPE=CELL:\+62896123345667/);
+  assert.match(last.content.contacts.contacts[0].vcard, /TEL;type=CELL;type=VOICE;waid=62896123345667:\+62896123345667/);
   assert.match(last.content.contacts.contacts[2].vcard, /FN:6281299998888/, "tanpa nama pakai nomor");
 
   // Nomor tidak valid ditolak dengan 400.

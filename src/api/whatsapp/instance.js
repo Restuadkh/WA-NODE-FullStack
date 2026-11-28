@@ -483,10 +483,11 @@ class WhatsAppInstance extends EventEmitter {
    * satu pesan (penerima melihat daftar kontak yang bisa di-tap satu per satu).
    * `opts.quoted` sama seperti sendText.
    */
-  sendContact(jid, { displayName, vcards }, opts = {}) {
+  async sendContact(jid, { displayName, vcards }, opts = {}) {
     const list = Array.isArray(vcards) ? vcards : vcards ? [vcards] : [];
     if (!list.length) throw new Error("vCard kosong");
-    return this._ensureOnline().sendMessage(
+    const sock = this._ensureOnline();
+    return await sock.sendMessage(
       jid,
       { contacts: { displayName, contacts: list.map((vcard) => ({ vcard })) } },
       buildSendOpts(opts),

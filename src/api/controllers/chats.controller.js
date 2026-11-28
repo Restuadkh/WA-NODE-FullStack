@@ -247,19 +247,36 @@ async function sendMessage(req, res) {
     for (const c of rawContacts.slice(0, 25)) {
       if (!c || typeof c !== "object") continue;
       const name = String(c.name ?? "").trim();
+      const org = String(c.org ?? c.organization ?? "").trim();
       const digits = normalizePhoneDigits(c.phone);
       if (!digits || digits.length < 8) throw httpError(`Nomor kontak tidak valid: ${name || "(tanpa nama)"}`, 400);
+
+      // Periksa apakah nomor terdaftar di WhatsApp sebelum membuat vCard.
+      try {
+        const sock = typeof instance._ensureOnline === "function" ? instance._ensureOnline() : instance.sock || instance;
+        const [result] = (await sock.onWhatsApp(digits)) || [];
+        if (!result?.exists) throw httpError(`Nomor ${digits} tidak terdaftar di WhatsApp`, 400);
+      } catch (err) {
+        if (err?.status) throw err;
+        throw httpError(`Gagal memeriksa nomor ${digits} di WhatsApp`, 502);
+      }
+
+      const vcardLines = [
+        "BEGIN:VCARD",
+        "VERSION:3.0",
+        `FN:${name || digits}`,
+      ];
+      if (org) vcardLines.push(`ORG:${org};`);
+      vcardLines.push(
+        `TEL;type=CELL;type=VOICE;waid=${digits}:+${digits}`,
+        `URL:https://wa.me/${digits}`,
+        "END:VCARD",
+      );
+
       entries.push({
         name,
         digits,
-        vcard: [
-          "BEGIN:VCARD",
-          "VERSION:3.0",
-          `FN:${name || digits}`,
-          `TEL;TYPE=CELL:+${digits}`,
-          `URL:https://wa.me/${digits}`,
-          "END:VCARD",
-        ].join("\n"),
+        vcard: vcardLines.join("\n"),
       });
     }
     if (!entries.length) throw httpError("Tidak ada kontak yang valid untuk dikirim", 400);
