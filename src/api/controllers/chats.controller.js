@@ -5,11 +5,14 @@ const { sendAndStore, PREVIEW } = require("../services/messageService");
 const { phoneFromJid, normalizePhoneDigits } = require("../whatsapp/jid");
 const mediaStore = require("../services/mediaStore");
 const { assertDeviceAccess } = require("../services/deviceAccess");
+const cache = require("../services/cache");
 
 const httpError = require("../services/httpError");
 const config = require("../../config/config");
 const MAX_TEXT = 4096;
 const MEDIA_TYPES = ["image", "video", "audio", "sticker", "document"];
+const CHATS_CACHE_TTL = 15_000;
+const MESSAGES_CACHE_TTL = 15_000;
 
 // Tebak jenis media dari MIME/ekstensi. File .webp dianggap stiker.
 function detectMediaType(file) {
@@ -24,31 +27,33 @@ function detectMediaType(file) {
 
 async function listChats(req, res) {
   await assertDeviceAccess(req.user, req.params.deviceId);
-  const chats = await Chat.findAll({
-    where: { device_id: req.params.deviceId },
-    order: [["last_message_at", "DESC"]],
-    limit: 500,
-  });
-  // Chat bisa tersimpan dengan jid LID (2454...@lid). Petakan ke nomor aslinya lewat
-  // tabel numbers (ContactName: lid_user -> from_jid) agar tampil sebagai nomor, bukan LID.
-  const lidJids = chats.map((c) => c.wa_jid).filter((j) => String(j).endsWith("@lid"));
-  const numbers = lidJids.length
-    ? await ContactName.findAll({
-        where: { device_id: req.params.deviceId, lid_user: { [Op.in]: lidJids } },
-        attributes: ["lid_user", "from_jid"],
-      })
-    : [];
-  const phoneByLid = new Map(numbers.map((n) => [n.lid_user, phoneFromJid(n.from_jid)]));
+  const cacheKey = `chats:${req.params.deviceId}`;
+  const data = await cache.wrap(cacheKey, CHATS_CACHE_TTL, async () => {
+    const chats = await Chat.findAll({
+      where: { device_id: req.params.deviceId },
+      order: [["last_message_at", "DESC"]],
+      limit: 500,
+    });
+    // Chat bisa tersimpan dengan jid LID (2454...@lid). Petakan ke nomor aslinya lewat
+    // tabel numbers (ContactName: lid_user -> from_jid) agar tampil sebagai nomor, bukan LID.
+    const lidJids = chats.map((c) => c.wa_jid).filter((j) => String(j).endsWith("@lid"));
+    const numbers = lidJids.length
+      ? await ContactName.findAll({
+          where: { device_id: req.params.deviceId, lid_user: { [Op.in]: lidJids } },
+          attributes: ["lid_user", "from_jid"],
+        })
+      : [];
+    const phoneByLid = new Map(numbers.map((n) => [n.lid_user, phoneFromJid(n.from_jid)]));
 
-  res.json({
-    error: false,
-    data: chats.map((c) => {
+    return chats.map((c) => {
       const row = c.toJSON();
       const phone = phoneByLid.get(c.wa_jid) || null;
       row.phone = phone; // nomor asli bila wa_jid berupa LID, selain itu null
       return row;
-    }),
+    });
   });
+
+  res.json({ error: false, data });
 }
 
 // ACL: chat dicari lewat chatId, jadi akses dicek lewat device pemilik chat.
@@ -62,48 +67,58 @@ async function findChatWithAccess(chatId, user) {
 // Pesan terbaru (urut lama -> baru). ?limit=200 (maks 500), ?before=<ISO date> untuk halaman sebelumnya.
 async function listMessages(req, res) {
   const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
-  const where = { chat_id: req.params.chatId };
-  if (req.query.before) {
-    const before = new Date(String(req.query.before));
-    if (!Number.isNaN(before.getTime())) where.createdAt = { [Op.lt]: before };
-  }
-  const rows = await Message.findAll({
-    where,
-    order: [
-      ["createdAt", "DESC"],
-      ["id", "DESC"],
-    ],
-    limit,
-  });
-  const chat = await Chat.findByPk(req.params.chatId, { attributes: ["device_id", "is_group"] });
-  if (chat) await assertDeviceAccess(req.user, chat.device_id);
+  const beforeRaw = req.query.before ? String(req.query.before) : "";
+  const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+  const beforeMs = beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate.getTime() : 0;
+  const cacheKey = `messages:${req.params.chatId}:${limit}:${beforeMs}`;
 
-  // Grup: lengkapi identitas pengirim tiap pesan dari tabel numbers
-  // (sender_jid bisa berupa nomor jid atau LID -> petakan ke nama & nomor).
-  let data = mediaStore.refreshUrls(rows.reverse());
-  if (chat?.is_group) {
-    const senders = [...new Set(rows.map((r) => r.sender_jid).filter(Boolean))];
-    const numbers = senders.length
-      ? await ContactName.findAll({
-          where: { device_id: chat.device_id, [Op.or]: [{ from_jid: { [Op.in]: senders } }, { lid_user: { [Op.in]: senders } }] },
-          attributes: ["from_jid", "lid_user", "notify"],
-        })
-      : [];
-    const byJid = new Map();
-    for (const n of numbers) {
-      if (n.from_jid) byJid.set(n.from_jid, n);
-      if (n.lid_user) byJid.set(n.lid_user, n);
-    }
-    data = data.map((r) => {
-      const plain = r.toJSON ? r.toJSON() : r;
-      const n = byJid.get(r.sender_jid);
-      plain.sender_name = n?.notify || null;
-      plain.sender_phone = n?.from_jid ? phoneFromJid(n.from_jid) : (r.sender_jid ? r.sender_jid.split("@")[0] : null);
-      return plain;
+  const cached = await cache.wrap(cacheKey, MESSAGES_CACHE_TTL, async () => {
+    const where = { chat_id: req.params.chatId };
+    if (beforeMs) where.createdAt = { [Op.lt]: new Date(beforeMs) };
+
+    const rows = await Message.findAll({
+      where,
+      order: [
+        ["createdAt", "DESC"],
+        ["id", "DESC"],
+      ],
+      limit,
     });
-  }
+    const chat = await Chat.findByPk(req.params.chatId, { attributes: ["device_id", "is_group"] });
+    if (chat) await assertDeviceAccess(req.user, chat.device_id);
 
-  res.json({ error: false, data });
+    // Grup: lengkapi identitas pengirim tiap pesan dari tabel numbers
+    // (sender_jid bisa berupa nomor jid atau LID -> petakan ke nama & nomor).
+    let data = rows.reverse().map((r) => r.toJSON());
+    if (chat?.is_group) {
+      const senders = [...new Set(data.map((r) => r.sender_jid).filter(Boolean))];
+      const numbers = senders.length
+        ? await ContactName.findAll({
+            where: {
+              device_id: chat.device_id,
+              [Op.or]: [{ from_jid: { [Op.in]: senders } }, { lid_user: { [Op.in]: senders } }],
+            },
+            attributes: ["from_jid", "lid_user", "notify"],
+          })
+        : [];
+      const byJid = new Map();
+      for (const n of numbers) {
+        if (n.from_jid) byJid.set(n.from_jid, n);
+        if (n.lid_user) byJid.set(n.lid_user, n);
+      }
+      data = data.map((r) => {
+        const n = byJid.get(r.sender_jid);
+        r.sender_name = n?.notify || null;
+        r.sender_phone = n?.from_jid ? phoneFromJid(n.from_jid) : r.sender_jid ? r.sender_jid.split("@")[0] : null;
+        return r;
+      });
+    }
+
+    return { deviceId: chat?.device_id || null, data };
+  });
+
+  if (cached.deviceId) await assertDeviceAccess(req.user, cached.deviceId);
+  res.json({ error: false, data: mediaStore.refreshUrls(cached.data) });
 }
 
 // Selesaikan target reply: cari pesan di chat ini berdasarkan wa_message_id.
@@ -273,7 +288,10 @@ async function sendMessage(req, res) {
 
 async function markRead(req, res) {
   const chat = await findChatWithAccess(req.params.chatId, req.user);
-  if (chat.unread_count) await chat.update({ unread_count: 0 });
+  if (chat.unread_count) {
+    await chat.update({ unread_count: 0 });
+    cache.invalidate(`chats:${chat.device_id}`);
+  }
 
   // Mode senyap (SEND_READ_RECEIPTS=false): jangan kirim "terbaca" ke WhatsApp —
   // proyek berjalan di belakang layar; badge lokal tetap dibersihkan di atas.

@@ -2,6 +2,7 @@ const { Chat, Message } = require("../models");
 const { emitToDevice } = require("./realtime");
 const logger = require("./logger");
 const mediaStore = require("./mediaStore");
+const cache = require("./cache");
 const { toJid, isPhoneNumber } = require("../whatsapp/jid");
 
 const httpError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
@@ -192,6 +193,8 @@ async function storeMessage({
   if (direction === "incoming") patch.unread_count = (chat.unread_count || 0) + 1;
   await chat.update(patch);
 
+  cache.invalidate(`chats:${device.id}`);
+  cache.invalidatePrefix(`messages:${chat.id}:`);
   emitToDevice(device.id, "message:new", { chat_id: chat.id, message });
   return { message, created: true };
 }

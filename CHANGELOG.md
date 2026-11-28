@@ -9,8 +9,15 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
 - **Inbox terasa "refresh sendiri"**: pemuatan chat dari parameter URL (`?chat=...`) dipisahkan dari polling daftar chat, sehingga efek polling tidak lagi tergantung pada query param dan tidak memicu siklus buka-chat ulang. Polling cadangan 8 detik tetap ada sebagai fallback realtime, tetapi pembaruan chat/pesan tidak memaksa lompatan scroll.
 - Pembersihan kecil: penghapusan duplikasi `setText`/`clearAttachment` pada alur kirim pesan.
 
+### Ditambah — Cache inbox (performa buka chat)
+- **Frontend in-memory cache**: daftar chat di-cache per device dan riwayat pesan di-cache per chat. Saat membuka chat yang pernah dimuat, pesan ditampilkan langsung dari cache lalu direvalidasi ke server di latar belakang.
+- **Backend read cache (in-process)**: endpoint `GET /api/devices/:deviceId/chats` dan `GET /api/chats/:chatId/messages` memakai cache TTL pendek (15 detik) berbasis `services/cache.js` untuk mengurangi query DB saat polling/navigasi ulang.
+- **Invalidasi cache backend**: cache chat/pesan di-invalidate saat ada pesan masuk/keluar baru, edit pesan, update status pesan, atau `markRead`, sehingga data unread/status tetap konsisten.
+- Respons pesan tetap menyegarkan URL media bertanda tangan saat dikirim ke klien, meski data pesan di-cache.
+
 ### 🧪 Tes
 - Frontend berhasil di-build (`npm --prefix frontend run build`, Vite, 86 modul).
+- Backend lulus `node --check` untuk controller/service terkait dan `npm run lint` pada file yang diubah.
 
 ## [3.1.0] — 2026-11-27
 

@@ -136,6 +136,8 @@ export default function Inbox() {
   const recorderCancelled = useRef(false);
   const attachmentRef = useRef(null);
   const textareaRef = useRef(null);
+  const chatsCacheRef = useRef(new Map()); // deviceId -> { data, at }
+  const messagesCacheRef = useRef(new Map()); // chatId -> { data, at }
   attachmentRef.current = attachment;
   activeIdRef.current = activeId;
 
@@ -209,9 +211,15 @@ export default function Inbox() {
     clearAttachment();
   }, [deviceId, clearAttachment]);
 
-  const loadMessages = useCallback(async (chatId) => {
+  const loadMessages = useCallback(async (chatId, { background = false } = {}) => {
+    const cached = messagesCacheRef.current.get(chatId);
+    if (cached && activeIdRef.current === chatId) {
+      setMessages(cached.data);
+      if (background) return;
+    }
     try {
       const list = await api.listMessages(chatId);
+      messagesCacheRef.current.set(chatId, { data: list, at: Date.now() });
       if (activeIdRef.current === chatId) setMessages(list);
     } catch (e) {
       setError(e.message);
@@ -222,15 +230,22 @@ export default function Inbox() {
   const loadChats = useCallback(
     async (showSpinner) => {
       if (!deviceId) return;
-      if (showSpinner) setLoadingChats(true);
+      const cached = chatsCacheRef.current.get(deviceId);
+      if (cached) {
+        setChats(cached.data);
+        if (showSpinner) setLoadingChats(false);
+      } else if (showSpinner) {
+        setLoadingChats(true);
+      }
       try {
         const list = await api.listChats(deviceId);
+        chatsCacheRef.current.set(deviceId, { data: list, at: Date.now() });
         setChats(list);
         setError("");
         return list;
       } catch (e) {
-        setError(e.message);
-        return null;
+        if (!cached) setError(e.message);
+        return cached?.data || null;
       } finally {
         setLoadingChats(false);
       }
@@ -244,15 +259,21 @@ export default function Inbox() {
     if (!target || !deviceId) return;
     let cancelled = false;
     (async () => {
-      const list = await api.listChats(deviceId).catch(() => null);
+      let list = chatsCacheRef.current.get(deviceId)?.data;
+      if (!list) {
+        list = await api.listChats(deviceId).catch(() => null);
+        if (list) chatsCacheRef.current.set(deviceId, { data: list, at: Date.now() });
+      }
       if (cancelled || !list) return;
       setChats(list);
       if (list.some((c) => c.id === target)) {
         stickToBottomRef.current = true;
         prevLastMsgIdRef.current = null;
         setActiveId(target);
-        setMessages([]);
         setMobileChatOpen(true);
+        const cachedMessages = messagesCacheRef.current.get(target);
+        if (cachedMessages) setMessages(cachedMessages.data);
+        else setMessages([]);
         loadMessages(target);
       }
       setParams({}, { replace: true });
@@ -282,20 +303,25 @@ export default function Inbox() {
     const onNew = async ({ chat_id, message }) => {
       const isActive = chat_id === activeIdRef.current;
       if (isActive) {
-        setMessages((list) => (list.some((m) => m.id === message.id) ? list : [...list, message]));
+        setMessages((list) => {
+          const next = list.some((m) => m.id === message.id) ? list : [...list, message];
+          messagesCacheRef.current.set(chat_id, { data: next, at: Date.now() });
+          return next;
+        });
         // chat sedang dibuka -> pesan masuk langsung dianggap terbaca
         if (message.direction === "incoming") await api.markRead(chat_id).catch(() => {});
       }
+      chatsCacheRef.current.delete(deviceId);
       loadChats(false); // urutan & unread diambil dari server
     };
     const onUpdate = ({ message_id, status, edited }) =>
-      setMessages((list) =>
-        list.map((m) =>
-          m.id === message_id
-            ? { ...m, ...(status ? { status } : {}), ...(edited || {}) }
-            : m,
-        ),
-      );
+      setMessages((list) => {
+        const next = list.map((m) =>
+          m.id === message_id ? { ...m, ...(status ? { status } : {}), ...(edited || {}) } : m,
+        );
+        if (activeIdRef.current) messagesCacheRef.current.set(activeIdRef.current, { data: next, at: Date.now() });
+        return next;
+      });
     const onStatus = ({ device_id, status }) =>
       setDevices((list) => list.map((d) => (d.id === device_id ? { ...d, status } : d)));
 
@@ -316,10 +342,12 @@ export default function Inbox() {
     stickToBottomRef.current = true;
     prevLastMsgIdRef.current = null;
     setActiveId(chat.id);
-    setMessages([]);
     setMobileChatOpen(true);
+    const cached = messagesCacheRef.current.get(chat.id);
+    if (cached) setMessages(cached.data);
+    else setMessages([]);
     if (chat.unread_count > 0) markRead(chat.id);
-    loadMessages(chat.id);
+    loadMessages(chat.id, { background: !!cached });
   };
 
   const onMessagesScroll = () => {
@@ -356,7 +384,13 @@ export default function Inbox() {
       try {
         const msg = await api.sendContact(activeChat.id, contacts);
         setContactForm(null);
-        if (msg) setMessages((list) => (list.some((m) => m.id === msg.id) ? list : [...list, msg]));
+        if (msg)
+          setMessages((list) => {
+            const next = list.some((m) => m.id === msg.id) ? list : [...list, msg];
+            messagesCacheRef.current.set(activeChat.id, { data: next, at: Date.now() });
+            return next;
+          });
+        chatsCacheRef.current.delete(deviceId);
         loadChats(false);
       } catch (err) {
         setError(err.message);
@@ -385,7 +419,13 @@ export default function Inbox() {
       setText("");
       clearAttachment();
       setReplyTo(null);
-      if (msg) setMessages((list) => (list.some((m) => m.id === msg.id) ? list : [...list, msg]));
+      if (msg)
+        setMessages((list) => {
+          const next = list.some((m) => m.id === msg.id) ? list : [...list, msg];
+          messagesCacheRef.current.set(activeChat.id, { data: next, at: Date.now() });
+          return next;
+        });
+      chatsCacheRef.current.delete(deviceId);
       loadChats(false);
     } catch (err) {
       setError(err.message);
