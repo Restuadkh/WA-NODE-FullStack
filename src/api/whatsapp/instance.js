@@ -223,6 +223,10 @@ class WhatsAppInstance extends EventEmitter {
       }
     });
     sock.ev.on("messages.update", (updates) => this.emit("message.update", updates));
+    // Sync kontak dari WhatsApp (yang tersedia ke linked device). Bisa datang saat connect/sync.
+    sock.ev.on("messaging-history.set", ({ contacts }) => this.emit("contacts:set", contacts || []));
+    sock.ev.on("contacts.upsert", (contacts) => this.emit("contacts:upsert", contacts || []));
+    sock.ev.on("contacts.update", (updates) => this.emit("contacts:update", updates || []));
 
     if (!state.creds.registered) this._setStatus("pending_qr");
   }

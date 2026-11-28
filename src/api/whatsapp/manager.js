@@ -4,6 +4,7 @@ const logger = require("../services/logger");
 const { emitAll } = require("../services/realtime");
 const { notify } = require("../services/webhook");
 const { handleIncoming, handleStatusUpdates } = require("../services/messageHandler");
+const { syncContacts, upsertContact } = require("../services/numberService");
 const { WhatsAppInstance } = require("./instance");
 const { listStoredKeys } = require("./authStore");
 const { normalizePhoneDigits } = require("./jid");
@@ -42,6 +43,27 @@ function create(device) {
     for (const msg of messages) handleIncoming(instance.device, instance, msg, { fromHistory: true });
   });
   instance.on("message.update", (updates) => handleStatusUpdates(instance.device, updates));
+
+  const syncContactSafe = (payload, source) => {
+    Promise.resolve(syncContacts(instance.device, payload)).catch((err) =>
+      logger.warn({ err: err.message, device: instance.device?.id, source }, "Gagal sync kontak WhatsApp"),
+    );
+  };
+  instance.on("contacts:set", (contacts) => syncContactSafe(contacts, "history.set"));
+  instance.on("contacts:upsert", (contacts) => syncContactSafe(contacts, "upsert"));
+  instance.on("contacts:update", (updates) => {
+    // contacts.update biasanya berisi patch parsial; upsert per item agar notify/jid/lid terbarui.
+    const list = Array.isArray(updates) ? updates : [];
+    for (const c of list) {
+      const jid = c?.id?.endsWith?.("@s.whatsapp.net") ? c.id : c?.jid?.endsWith?.("@s.whatsapp.net") ? c.jid : null;
+      const lid = c?.lid?.endsWith?.("@lid") ? c.lid : c?.id?.endsWith?.("@lid") ? c.id : null;
+      const notify = c?.notify || c?.name || c?.verifiedName || c?.pushName || null;
+      if (!jid && !lid && !notify) continue;
+      Promise.resolve(upsertContact(instance.device, { jid, lid, notify })).catch((err) =>
+        logger.warn({ err: err.message, device: instance.device?.id, source: "update" }, "Gagal update kontak WhatsApp"),
+      );
+    }
+  });
 
   instances.set(device.instance_key, instance);
   return instance;

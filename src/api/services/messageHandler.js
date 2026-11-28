@@ -113,7 +113,11 @@ async function handleIncoming(device, instance, msg, { fromHistory = false } = {
   // Pemetaan nomor <-> LID + nama kontak. Kegagalan di sini tidak boleh menghentikan penyimpanan pesan.
   try {
     const key = msg.message?.key ?? msg.key;
-    await storeNumberName(getWhatsappJid(key), getWhatsappLid(key), getWhatsappName(msg), device);
+    const jidContact = getWhatsappJid(key);
+    const lidContact = getWhatsappLid(key);
+    const nameContact = getWhatsappName(msg);
+    await storeNumberName(jidContact, lidContact, nameContact, device);
+    // Sumber nama notify tambahan dari history sync/contact sync juga akan mengisi tabel numbers.
   } catch (err) {
     logger.warn({ err: err.message, device: device.id }, "Gagal menyimpan nama kontak");
   }

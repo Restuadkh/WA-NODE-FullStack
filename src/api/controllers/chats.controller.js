@@ -34,21 +34,37 @@ async function listChats(req, res) {
       order: [["last_message_at", "DESC"]],
       limit: 500,
     });
-    // Chat bisa tersimpan dengan jid LID (2454...@lid). Petakan ke nomor aslinya lewat
-    // tabel numbers (ContactName: lid_user -> from_jid) agar tampil sebagai nomor, bukan LID.
-    const lidJids = chats.map((c) => c.wa_jid).filter((j) => String(j).endsWith("@lid"));
-    const numbers = lidJids.length
+    // Petakan LID/nama kontak dari tabel numbers agar inbox menampilkan identitas yang konsisten.
+    const jids = chats.map((c) => c.wa_jid).filter(Boolean);
+    const lidJids = jids.filter((j) => String(j).endsWith("@lid"));
+    const phoneJids = jids.filter((j) => String(j).endsWith("@s.whatsapp.net"));
+    const numbers = jids.length
       ? await ContactName.findAll({
-          where: { device_id: req.params.deviceId, lid_user: { [Op.in]: lidJids } },
-          attributes: ["lid_user", "from_jid"],
+          where: {
+            device_id: req.params.deviceId,
+            [Op.or]: [
+              ...(lidJids.length ? [{ lid_user: { [Op.in]: lidJids } }] : []),
+              ...(phoneJids.length ? [{ from_jid: { [Op.in]: phoneJids } }] : []),
+            ],
+          },
+          attributes: ["lid_user", "from_jid", "notify"],
         })
       : [];
-    const phoneByLid = new Map(numbers.map((n) => [n.lid_user, phoneFromJid(n.from_jid)]));
+    const byLid = new Map();
+    const byJid = new Map();
+    for (const n of numbers) {
+      if (n.lid_user) byLid.set(n.lid_user, n);
+      if (n.from_jid) byJid.set(n.from_jid, n);
+    }
 
     return chats.map((c) => {
       const row = c.toJSON();
-      const phone = phoneByLid.get(c.wa_jid) || null;
-      row.phone = phone; // nomor asli bila wa_jid berupa LID, selain itu null
+      const n = byJid.get(c.wa_jid) || byLid.get(c.wa_jid) || null;
+      const phone = n?.from_jid ? phoneFromJid(n.from_jid) : phoneFromJid(c.wa_jid);
+      row.phone = phone || null;
+      row.lid = n?.lid_user || (String(c.wa_jid).endsWith("@lid") ? c.wa_jid : null);
+      row.notify = n?.notify || null;
+      if (!row.contact_name && n?.notify) row.contact_name = n.notify;
       return row;
     });
   });
@@ -87,32 +103,33 @@ async function listMessages(req, res) {
     const chat = await Chat.findByPk(req.params.chatId, { attributes: ["device_id", "is_group"] });
     if (chat) await assertDeviceAccess(req.user, chat.device_id);
 
-    // Grup: lengkapi identitas pengirim tiap pesan dari tabel numbers
-    // (sender_jid bisa berupa nomor jid atau LID -> petakan ke nama & nomor).
+    // Lengkapi identitas pengirim/pesan dari tabel numbers (nomor/LID/notify).
     let data = rows.reverse().map((r) => r.toJSON());
-    if (chat?.is_group) {
-      const senders = [...new Set(data.map((r) => r.sender_jid).filter(Boolean))];
-      const numbers = senders.length
-        ? await ContactName.findAll({
-            where: {
-              device_id: chat.device_id,
-              [Op.or]: [{ from_jid: { [Op.in]: senders } }, { lid_user: { [Op.in]: senders } }],
-            },
-            attributes: ["from_jid", "lid_user", "notify"],
-          })
-        : [];
-      const byJid = new Map();
-      for (const n of numbers) {
-        if (n.from_jid) byJid.set(n.from_jid, n);
-        if (n.lid_user) byJid.set(n.lid_user, n);
-      }
-      data = data.map((r) => {
-        const n = byJid.get(r.sender_jid);
-        r.sender_name = n?.notify || null;
-        r.sender_phone = n?.from_jid ? phoneFromJid(n.from_jid) : r.sender_jid ? r.sender_jid.split("@")[0] : null;
-        return r;
-      });
+    const senders = [...new Set(data.map((r) => r.sender_jid).filter(Boolean))];
+    const numbers = senders.length
+      ? await ContactName.findAll({
+          where: {
+            device_id: chat.device_id,
+            [Op.or]: [{ from_jid: { [Op.in]: senders } }, { lid_user: { [Op.in]: senders } }],
+          },
+          attributes: ["from_jid", "lid_user", "notify"],
+        })
+      : [];
+    const byJid = new Map();
+    for (const n of numbers) {
+      if (n.from_jid) byJid.set(n.from_jid, n);
+      if (n.lid_user) byJid.set(n.lid_user, n);
     }
+    data = data.map((r) => {
+      const n = r.sender_jid ? byJid.get(r.sender_jid) : null;
+      r.sender_name = n?.notify || null;
+      r.sender_phone = n?.from_jid
+        ? phoneFromJid(n.from_jid)
+        : r.sender_jid
+          ? String(r.sender_jid).split("@")[0]
+          : null;
+      return r;
+    });
 
     return { deviceId: chat?.device_id || null, data };
   });

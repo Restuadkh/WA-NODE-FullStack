@@ -15,6 +15,12 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
 - **Invalidasi cache backend**: cache chat/pesan di-invalidate saat ada pesan masuk/keluar baru, edit pesan, update status pesan, atau `markRead`, sehingga data unread/status tetap konsisten.
 - Respons pesan tetap menyegarkan URL media bertanda tangan saat dikirim ke klien, meski data pesan di-cache.
 
+### Ditambah — Sinkron kontak WhatsApp
+- **Sync kontak dari Baileys**: instance WhatsApp kini mendengarkan event `messaging-history.set`, `contacts.upsert`, dan `contacts.update` untuk menangkap kontak yang tersedia ke linked device, lalu menyimpannya ke tabel `numbers` (`ContactName`).
+- **Data kontak tersimpan**: `from_jid` (nomor `@s.whatsapp.net`), `lid_user` (LID `@lid`), `notify` (nama/notify kontak), serta `created_at`/`updated_at`.
+- **Dedupe/update kontak**: nomor/LID yang sama tidak membuat baris ganda; jika kontak sudah ada, data yang berubah (terutama `notify`/nama) diperbarui. Nama kontak juga disinkronkan ke `Chat.contact_name` agar tampil di inbox.
+- **Identitas inbox**: daftar chat/pesan kini memperkaya identitas dari tabel kontak (nomor, LID, notify/nama) sehingga chat yang memakai LID atau punya notify baru bisa ditampilkan lebih konsisten.
+
 ### 🧪 Tes
 - Frontend berhasil di-build (`npm --prefix frontend run build`, Vite, 86 modul).
 - Backend lulus `node --check` untuk controller/service terkait dan `npm run lint` pada file yang diubah.
