@@ -63,7 +63,11 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; }
+html, body, #root {
+  height: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -165,17 +169,18 @@ h2 { font-size: 17px; font-weight: 600; }
 .job-target { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Shell ---------- */
-/* Jendela aplikasi mengapung di atas latar beige, seperti mockup browser pada referensi. */
+/* Shell fullscreen: isi aplikasi memenuhi viewport. */
 .shell {
   display: grid;
   grid-template-columns: 248px 1fr;
-  height: calc(100dvh - 24px);
-  margin: 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 22px;
+  height: 100dvh;
+  min-height: 100dvh;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
   overflow: hidden;
   background: var(--app);
-  box-shadow: var(--shadow);
+  box-shadow: none;
 }
 .sidebar {
   background: var(--surface-3);
@@ -214,7 +219,7 @@ h2 { font-size: 17px; font-weight: 600; }
 .sidebar-foot { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .who-name { font-weight: 600; }
 .who-meta { font-size: 12px; color: var(--muted); word-break: break-all; }
-.content { min-width: 0; overflow: auto; background: var(--app); }
+.content { min-width: 0; overflow: auto; background: var(--app); height: 100dvh; }
 
 /* ---------- Page ---------- */
 .page { padding: 32px 34px 40px; max-width: 1120px; margin: 0 auto; width: 100%; }
