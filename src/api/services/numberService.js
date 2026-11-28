@@ -102,12 +102,15 @@ async function upsertContact(device, { jid, lid, notify }) {
     }
   }
 
-  // Sinkronkan nama ke chat agar tampil di inbox.
-  if (row?.from_jid && row.notify) {
-    await Chat.update(
-      { contact_name: row.notify },
-      { where: { device_id: deviceId, wa_jid: row.from_jid, is_group: false } },
-    ).catch(() => {});
+  // Sinkronkan nama ke chat agar tampil di inbox (termasuk LID/nomor terkait).
+  if (row?.notify) {
+    const jids = [row.from_jid, row.lid_user].filter(Boolean);
+    if (jids.length) {
+      await Chat.update(
+        { contact_name: row.notify },
+        { where: { device_id: deviceId, wa_jid: { [Op.in]: jids }, is_group: false } },
+      ).catch(() => {});
+    }
   }
 
   cache.set(cacheKey, true, 60_000);

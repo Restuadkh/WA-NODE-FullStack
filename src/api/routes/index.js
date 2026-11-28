@@ -74,6 +74,7 @@ router.delete("/devices/:id", admin, devices.removeDevice);
 
 router.get("/devices/:deviceId/chats", chats.listChats);
 router.get("/devices/:deviceId/contacts", contacts.listContacts);
+router.post("/devices/:deviceId/contacts/import", chatUpload, contacts.importContacts);
 router.post("/devices/:deviceId/contacts/:contactId/chat", contacts.openContactChat);
 router.get("/chats/:chatId/messages", chats.listMessages);
 router.post("/chats/:chatId/messages", chatUpload, chats.sendMessage);

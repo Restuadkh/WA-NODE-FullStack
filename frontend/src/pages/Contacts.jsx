@@ -107,6 +107,7 @@ export default function Contacts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sendContact, setSendContact] = useState(null);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     api.listDevices().then((list) => {
@@ -165,6 +166,31 @@ export default function Contacts() {
         <label className="field grow">
           <span>Cari</span>
           <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nama, nomor, atau LID" />
+        </label>
+        <label className="btn" style={{ marginBottom: 0, cursor: importing ? "wait" : "pointer" }}>
+          {importing ? "Import..." : "Import VCF"}
+          <input
+            type="file"
+            accept=".vcf,text/vcard,text/x-vcard"
+            hidden
+            disabled={importing || !deviceId}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file || !deviceId) return;
+              setImporting(true);
+              setError("");
+              try {
+                const r = await api.importContactsVcf(deviceId, file);
+                await load();
+                alert(`Import VCF selesai. Total: ${r.total}, dibuat: ${r.created}, diproses: ${r.processed}, dilewati: ${r.skipped}.`);
+              } catch (err) {
+                setError(err.message);
+              } finally {
+                setImporting(false);
+              }
+            }}
+          />
         </label>
         <button className="btn" onClick={load} disabled={loading}>{loading ? "Memuat..." : "Refresh"}</button>
       </div>

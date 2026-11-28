@@ -30,6 +30,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); ve
 - **Halaman Kontak dashboard**: menu `Kontak` baru menampilkan daftar kontak tersinkron per device (notify/nama, nomor, LID, updated). Data diambil dari tabel `numbers` (`ContactName`).
 - **Aksi Chat**: tombol Chat membuka/membuat chat untuk kontak tersebut lalu mengarahkan ke Inbox (`/dashboard?chat=...`).
 - **Kirim pesan cepat (modal)**: tombol Kirim membuka modal untuk mengirim **text, image, video, audio, atau document** ke kontak. Untuk media/caption, frontend membuat/mencari chat kontak lalu memakai endpoint pesan chat yang sudah ada.
+- **Import VCF**: halaman Kontak mendukung import file `.vcf` untuk menambah kontak baru atau memperbarui kontak yang sudah ada berdasarkan nomor. Jika nama/notify kontak diperbarui, `contact_name` pada chat terkait (nomor/LID) juga ikut diperbarui agar tampil di inbox.
 
 ### 🧪 Tes
 - Frontend berhasil di-build (`npm --prefix frontend run build`, Vite, 86 modul).

@@ -104,6 +104,11 @@ export const api = {
   listChats: (deviceId) => request(`/api/devices/${deviceId}/chats`).then(data),
   listContacts: (deviceId, q = "") => request(`/api/devices/${deviceId}/contacts${q ? `?q=${encodeURIComponent(q)}` : ""}`).then(data),
   openContactChat: (deviceId, contactId) => request(`/api/devices/${deviceId}/contacts/${contactId}/chat`, { method: "POST" }).then(data),
+  importContactsVcf: (deviceId, file) => {
+    const form = new FormData();
+    form.append("file", file, file.name || "contacts.vcf");
+    return request(`/api/devices/${deviceId}/contacts/import`, { method: "POST", form }).then(data);
+  },
   listMessages: (chatId, limit = 200) =>
     request(`/api/chats/${chatId}/messages?limit=${limit}`).then(data),
   sendMessage: (chatId, text, { replyTo } = {}) =>
