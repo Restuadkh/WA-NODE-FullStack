@@ -107,14 +107,14 @@ function refreshUrl(stored) {
   }
 }
 
-// Terima array/objek Message Sequelize -> salin data + media_url segar.
+// Terima array/objek Message Sequelize atau plain object -> salin data + media_url segar.
 function refreshUrls(rows) {
-  const list = Array.isArray(rows) ? rows.map((r) => r.toJSON()) : null;
-  if (!list) return rows;
-  for (const row of list) {
+  if (!Array.isArray(rows)) return rows;
+  return rows.map((r) => {
+    const row = r && typeof r.toJSON === "function" ? r.toJSON() : { ...(r || {}) };
     if (row.media_url) row.media_url = refreshUrl(row.media_url);
-  }
-  return list;
+    return row;
+  });
 }
 
 // Simpan buffer media. Mengembalikan metadata siap disimpan ke kolom media_*.
