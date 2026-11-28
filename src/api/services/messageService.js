@@ -27,6 +27,32 @@ const MEDIA_LABEL = (type, content) => {
   return PREVIEW[type];
 };
 
+function parseContactBody(content) {
+  const cards = [];
+  if (content.contactMessage) cards.push(content.contactMessage);
+  if (Array.isArray(content.contactsArrayMessage?.contacts)) cards.push(...content.contactsArrayMessage.contacts);
+  const entries = [];
+  for (const c of cards) {
+    const vcard = String(c?.vcard || "");
+    const fn = vcard.match(/^FN[^:]*:(.+)$/im)?.[1]?.replace(/\\,/g, ",").replace(/\\;/g, ";").trim() || c?.displayName || "";
+    const waid = vcard.match(/waid=(\d+)/i)?.[1] || "";
+    const tel = vcard.match(/TEL[^:]*:([+\d][\d\s\-().]+)/i)?.[1] || "";
+    const digits = String(waid || tel || "").replace(/\D/g, "");
+    const phone = digits ? `+${digits}` : "";
+    const name = fn && fn !== digits && fn !== phone ? fn : "";
+    if (name || phone) entries.push({ name, phone, digits });
+  }
+  if (!entries.length) return "[Kontak]";
+  if (entries.length === 1) {
+    const e = entries[0];
+    const label = e.name || e.phone || "Kontak";
+    const detail = e.name && e.phone ? `${e.name} (${e.phone})` : label;
+    return e.digits ? `[Kontak] ${detail} - https://wa.me/${e.digits}` : `[Kontak] ${detail}`;
+  }
+  const list = entries.map((e) => e.name || e.phone || "Kontak").join(", ");
+  return `[Kontak] ${entries.length} kontak: ${list}`;
+}
+
 // Ambil jenis & isi teks dari pesan Baileys. Return null untuk pesan sistem (diabaikan).
 function parseContent(rawMessage) {
   const { normalizeMessageContent } = require("@whiskeysockets/baileys");
@@ -50,7 +76,7 @@ function parseContent(rawMessage) {
       return { type, body: m.caption ? `${label} ${m.caption}` : label };
     }
   }
-  if (content.contactMessage || content.contactsArrayMessage) return { type: "other", body: "[Kontak]" };
+  if (content.contactMessage || content.contactsArrayMessage) return { type: "other", body: parseContactBody(content) };
   if (content.locationMessage || content.liveLocationMessage) return { type: "other", body: "[Lokasi]" };
   return null; // reaction, protocol, poll update, dll.
 }

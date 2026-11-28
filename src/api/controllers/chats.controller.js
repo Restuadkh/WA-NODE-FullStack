@@ -267,7 +267,7 @@ async function sendMessage(req, res) {
     const displayName = entries.length === 1 ? entries[0].name || entries[0].digits : `${entries.length} kontak`;
     const previewBody =
       entries.length === 1
-        ? `[Kontak] ${displayName} (+${entries[0].digits})`
+        ? `[Kontak] ${displayName} (+${entries[0].digits}) - https://wa.me/${entries[0].digits}`
         : `[Kontak] ${entries.length} kontak: ${entries.map((e) => e.name || `+${e.digits}`).join(", ")}`;
 
     const { message, storageFailed } = await sendAndStore({
