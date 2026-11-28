@@ -102,6 +102,8 @@ export const api = {
 
   // --- chat
   listChats: (deviceId) => request(`/api/devices/${deviceId}/chats`).then(data),
+  listContacts: (deviceId, q = "") => request(`/api/devices/${deviceId}/contacts${q ? `?q=${encodeURIComponent(q)}` : ""}`).then(data),
+  openContactChat: (deviceId, contactId) => request(`/api/devices/${deviceId}/contacts/${contactId}/chat`, { method: "POST" }).then(data),
   listMessages: (chatId, limit = 200) =>
     request(`/api/chats/${chatId}/messages?limit=${limit}`).then(data),
   sendMessage: (chatId, text, { replyTo } = {}) =>

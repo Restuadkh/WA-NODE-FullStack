@@ -80,6 +80,10 @@ export default function Layout() {
             <Icon d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
             <span>Inbox</span>
           </NavLink>
+          <NavLink to="/contacts" aria-label="Kontak" title="Kontak" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <Icon d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
+            <span>Kontak</span>
+          </NavLink>
           <NavLink to="/devices" aria-label="Devices" title="Devices" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Icon d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM12 18h.01" />
             <span>Devices</span>

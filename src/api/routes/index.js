@@ -9,6 +9,7 @@ const rateLimit = require("../middlewares/rateLimit");
 const auth = require("../controllers/auth.controller");
 const devices = require("../controllers/devices.controller");
 const chats = require("../controllers/chats.controller");
+const contacts = require("../controllers/contacts.controller");
 const gateway = require("../controllers/gateway.controller");
 const users = require("../controllers/users.controller");
 const contact = require("../controllers/contact.controller");
@@ -72,6 +73,8 @@ router.post("/devices/:id/redial", admin, devices.redialDevice);
 router.delete("/devices/:id", admin, devices.removeDevice);
 
 router.get("/devices/:deviceId/chats", chats.listChats);
+router.get("/devices/:deviceId/contacts", contacts.listContacts);
+router.post("/devices/:deviceId/contacts/:contactId/chat", contacts.openContactChat);
 router.get("/chats/:chatId/messages", chats.listMessages);
 router.post("/chats/:chatId/messages", chatUpload, chats.sendMessage);
 router.post("/chats/:chatId/read", chats.markRead);
