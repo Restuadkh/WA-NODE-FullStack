@@ -125,7 +125,11 @@ export default function Inbox() {
   const [recordSeconds, setRecordSeconds] = useState(0);
 
   const bottomRef = useRef(null);
+  const messagesBoxRef = useRef(null);
   const activeIdRef = useRef(null);
+  const prevActiveRef = useRef(null);
+  const prevLastMsgIdRef = useRef(null);
+  const stickToBottomRef = useRef(true);
   const fileInputRef = useRef(null);
   const recorderRef = useRef(null);
   const recorderChunks = useRef([]);
@@ -223,25 +227,40 @@ export default function Inbox() {
         const list = await api.listChats(deviceId);
         setChats(list);
         setError("");
-        // Chat yang diminta lewat URL (?chat=<id>, mis. dari halaman Kontak) dibuka otomatis.
-        const target = params.get("chat");
-        if (target) {
-          if (list.some((c) => c.id === target)) {
-            setActiveId(target);
-            setMessages([]);
-            setMobileChatOpen(true);
-            loadMessages(target);
-          }
-          setParams({}, { replace: true }); // bersihkan URL agar refresh tidak membuka ulang
-        }
+        return list;
       } catch (e) {
         setError(e.message);
+        return null;
       } finally {
         setLoadingChats(false);
       }
     },
-    [deviceId, params, setParams, loadMessages],
+    [deviceId],
   );
+
+  // Chat yang diminta lewat URL (?chat=<id>, mis. dari halaman Kontak) dibuka otomatis.
+  useEffect(() => {
+    const target = params.get("chat");
+    if (!target || !deviceId) return;
+    let cancelled = false;
+    (async () => {
+      const list = await api.listChats(deviceId).catch(() => null);
+      if (cancelled || !list) return;
+      setChats(list);
+      if (list.some((c) => c.id === target)) {
+        stickToBottomRef.current = true;
+        prevLastMsgIdRef.current = null;
+        setActiveId(target);
+        setMessages([]);
+        setMobileChatOpen(true);
+        loadMessages(target);
+      }
+      setParams({}, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [params, deviceId, setParams, loadMessages]);
 
   useEffect(() => {
     loadChats(true);
@@ -294,6 +313,8 @@ export default function Inbox() {
 
   // --- buka chat
   const openChat = (chat) => {
+    stickToBottomRef.current = true;
+    prevLastMsgIdRef.current = null;
     setActiveId(chat.id);
     setMessages([]);
     setMobileChatOpen(true);
@@ -301,8 +322,24 @@ export default function Inbox() {
     loadMessages(chat.id);
   };
 
+  const onMessagesScroll = () => {
+    const el = messagesBoxRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    const el = messagesBoxRef.current;
+    if (!el) return;
+    const chatChanged = prevActiveRef.current !== activeId;
+    const lastId = messages.length ? messages[messages.length - 1].id : null;
+    const lastChanged = prevLastMsgIdRef.current !== lastId;
+    prevActiveRef.current = activeId;
+    prevLastMsgIdRef.current = lastId;
+
+    if (chatChanged || (stickToBottomRef.current && lastChanged)) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages, activeId]);
 
   const send = async (e) => {
@@ -344,11 +381,10 @@ export default function Inbox() {
             replyTo: quotedId,
           })
         : await api.sendMessage(activeChat.id, body, { replyTo: quotedId });
+      stickToBottomRef.current = true;
       setText("");
       clearAttachment();
       setReplyTo(null);
-      setText("");
-      clearAttachment();
       if (msg) setMessages((list) => (list.some((m) => m.id === msg.id) ? list : [...list, msg]));
       loadChats(false);
     } catch (err) {
@@ -528,7 +564,7 @@ export default function Inbox() {
               </div>
             </header>
 
-            <div className="messages">
+            <div className="messages" ref={messagesBoxRef} onScroll={onMessagesScroll}>
               {grouped.length === 0 && <div className="empty">Belum ada pesan.</div>}
               {grouped.map((row) =>
                 row.type === "day" ? (

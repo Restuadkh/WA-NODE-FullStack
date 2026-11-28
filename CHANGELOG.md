@@ -2,6 +2,16 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/); versi mengikuti SemVer.
 
+## [3.1.1] — 2026-11-28
+
+### Diperbaiki — Inbox
+- **Scroll tiba-tiba ke bawah saat membaca pesan lama**: auto-scroll sekarang hanya berjalan saat membuka chat atau saat pesan baru masuk dan pengguna memang sedang dekat bagian bawah percakapan. Jika pengguna sedang scroll ke atas, posisi scroll dipertahankan.
+- **Inbox terasa "refresh sendiri"**: pemuatan chat dari parameter URL (`?chat=...`) dipisahkan dari polling daftar chat, sehingga efek polling tidak lagi tergantung pada query param dan tidak memicu siklus buka-chat ulang. Polling cadangan 8 detik tetap ada sebagai fallback realtime, tetapi pembaruan chat/pesan tidak memaksa lompatan scroll.
+- Pembersihan kecil: penghapusan duplikasi `setText`/`clearAttachment` pada alur kirim pesan.
+
+### 🧪 Tes
+- Frontend berhasil di-build (`npm --prefix frontend run build`, Vite, 86 modul).
+
 ## [3.1.0] — 2026-11-27
 
 ### Ditambah — situs publik + formulir kontak
