@@ -28,6 +28,12 @@ export default function Layout() {
     localStorage.setItem(FONT_KEY, smallFont ? "1" : "0");
   }, [smallFont]);
 
+  // Kunci scroll body pada mode dashboard; scroll internal ditangani .content/.panel.
+  useEffect(() => {
+    document.body.classList.add("dashboard-mode");
+    return () => document.body.classList.remove("dashboard-mode");
+  }, []);
+
   // Sidebar drawer di smartphone: dibuka lewat tombol hamburger di bar atas,
   // ditutup dengan menyentuh backdrop / memilih menu / menekan Esc.
   const [navOpen, setNavOpen] = useState(false);

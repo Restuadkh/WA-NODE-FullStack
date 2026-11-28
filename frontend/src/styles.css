@@ -64,9 +64,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root {
-  height: 100%;
-  min-height: 100dvh;
-  overflow: hidden;
+  min-height: 100%;
 }
 body {
   margin: 0;
@@ -76,6 +74,10 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+body.dashboard-mode,
+body.public-lock {
+  overflow: hidden;
 }
 a { color: var(--accent-strong); text-underline-offset: 2px; }
 h1, h2 { margin: 0; letter-spacing: -0.02em; }

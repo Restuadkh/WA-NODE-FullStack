@@ -8,6 +8,15 @@
   background: var(--bg);
   color: var(--text);
 }
+.site-shell.site-locked {
+  height: 100dvh;
+  overflow: hidden;
+}
+.site-shell.site-locked .site-main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
 
 .site-skip {
   position: absolute;

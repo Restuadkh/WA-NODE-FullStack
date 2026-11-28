@@ -30,6 +30,8 @@ export default function PublicLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
+  const isHome = location.pathname === "/";
+
   // Tutup menu saat berpindah halaman atau menekan Escape.
   useEffect(() => setMenuOpen(false), [location.pathname]);
   useEffect(() => {
@@ -39,11 +41,17 @@ export default function PublicLayout() {
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen]);
 
+  // Hanya beranda yang boleh scroll; halaman publik lain dikunci fullscreen.
+  useEffect(() => {
+    document.body.classList.toggle("public-lock", !isHome);
+    return () => document.body.classList.remove("public-lock");
+  }, [isHome]);
+
   const current = Object.entries(pages).find(([, value]) => value.path === location.pathname);
   const breadcrumbLabel = current?.[1]?.h1;
 
   return (
-    <div className="site-shell">
+    <div className={`site-shell ${isHome ? "site-home" : "site-locked"}`}>
       <a className="site-skip" href="#main">Lewati ke konten</a>
 
       <header className="site-header">
